@@ -315,8 +315,8 @@ def main(argv):
     if sgp_sensor is False:
         try:
             sensor = bme680.BME680(bme680_addr)
-        except IOError:
-            print("Can't open BME680 at I2C addr" + bme680_addr)
+        except IOError as e:
+            print("Can't open BME680 at I2C addr: " + str(hex(bme680_addr)) + " (" + str(e) + ")")
             sys.exit(2)
     else:
         sgp30_mainloop(sensor_id, mqttc, mqtt_topic)
