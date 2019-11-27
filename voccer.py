@@ -10,8 +10,8 @@ import json
 import time
 import sys
 import getopt
-import bme680
 import paho.mqtt.client as mqtt
+import bme680
 from smbus2 import SMBusWrapper
 from sgp30 import Sgp30
 
@@ -279,7 +279,15 @@ def main(argv):
             "tempoffset"
         ])
     except getopt.GetoptError:
-        print('voccer.py -s sensor_id -f Bosch BME680 secondary addr')
+        print('voccer.py (without parameters there should')
+        print('be Bosch BME680 available in I2C addr 0x76)')
+        print('Parameters:')
+        print('  --sensorid (-s) Sensor id')
+        print('  --bme680second (-f) If there is second BME680 available in 0x77')
+        print('  --sgp30 (-g) Use Sensirion SGP30 not BME680')
+        print('  --tempoffset (-t) How much is temperature offset (+/-)')
+        print('  --mqttserver (-m) MQTT server location (default: localhost)')
+        print('  --mqttport (-p) MQTT server port (default: 1883)')
         sys.exit(2)
 
     for opt, arg in opts:
@@ -315,8 +323,9 @@ def main(argv):
     if sgp_sensor is False:
         try:
             sensor = bme680.BME680(bme680_addr)
-        except IOError as e:
-            print("Can't open BME680 at I2C addr: " + str(hex(bme680_addr)) + " (" + str(e) + ")")
+        except IOError as execption_str:
+            print("Can't open BME680 at I2C addr: "
+                  + str(hex(bme680_addr)) + " (" + str(execption_str) + ")")
             sys.exit(2)
     else:
         sgp30_mainloop(sensor_id, mqttc, mqtt_topic)
