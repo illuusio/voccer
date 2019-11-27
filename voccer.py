@@ -212,7 +212,7 @@ def mainloop_bme680(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
                 .format(sensor.data.temperature, sensor.data.pressure,
                         sensor.data.humidity))
             print(
-                '%RH, Resistance: {3:.2f} Ohm, Quality Indx {4:.2f}\n'.format(
+                '%RH, Resistance: {0:.2f} Ohm, Quality Indx {1:.2f}\n'.format(
                     sensor.data.gas_resistance, air_quality_scr))
 
             (rtn_value, mid) = mqttc.publish(
