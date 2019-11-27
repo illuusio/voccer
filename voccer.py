@@ -295,7 +295,7 @@ def main(argv):
             print('voccer.py -s sensor_id -f Bosch BME680 secondary addr')
             sys.exit()
         elif opt in ("-s", "--sensorid"):
-            sensor_id = arg
+            sensor_id = int(arg)
         elif opt in ("-f", "--bme680second"):
             bme680_addr = bme680.I2C_ADDR_SECONDARY
         elif opt in ("-g", "--sgp30"):
@@ -303,9 +303,9 @@ def main(argv):
         elif opt in ("-m", "--mqttserver"):
             mqtt_server = arg
         elif opt in ("-p", "--mqttport"):
-            mqtt_port = arg
+            mqtt_port = int(arg)
         elif opt in ("-t", "--tempoffset"):
-            temp_offset = arg
+            temp_offset = float(arg)
 
     mqttc = mqtt.Client()
 
