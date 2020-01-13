@@ -15,36 +15,45 @@ import bme680
 from smbus2 import SMBusWrapper
 from sgp30 import Sgp30
 
-
-def on_connect(mqttc, obj, flags, rtn_int):
+def on_connect(client, userdata, flags, rc):
     """Paho Connection callback."""
     # pylint: disable=W0612,W0613
-    print("Connected: " + str(rtn_int))
+    print("Paho MQTT Connected: " + str(rc))
 
+def on_disconnect(client, userdata, rc):
+    """Paho Disconnection callback."""
+    # pylint: disable=W0612,W0613
+    print("Paho MQTT Disconnected: " + str(rc))
 
-def on_message(mqttc, obj, msg):
+def on_socket_open(client, userdata, sock):
+    """Paho Socket open callback."""
+    # pylint: disable=W0612,W0613
+    print("Paho MQTT Socket open")
+
+def on_socket_close(client, userdata, sock):
+    """Paho Socjet close callback."""
+    # pylint: disable=W0612,W0613
+    print("Paho MQTT Socket close")
+
+def on_message(client, userdata, msg):
     """Paho Message send callback."""
     # pylint: disable=W0612,W0613
-    print("Message:" + msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
+    print("Paho MQTT Message:" + msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
 
-
-def on_publish(mqttc, obj, mid):
+def on_publish(client, userdata, mid):
     """Paho Message published callback."""
     # pylint: disable=W0612,W0613
-    print("Published: " + str(mid))
+    print("Paho MQTT Published: " + str(mid))
 
-
-def on_subscribe(mqttc, obj, mid, granted_qos):
+def on_subscribe(client, mid, granted_qos):
     """Paho Server subscribe callback."""
     # pylint: disable=W0612,W0613
-    print("Subscribed: " + str(mid) + " " + str(granted_qos))
+    print("Paho MQTT Subscribed: " + str(mid) + " " + str(granted_qos))
 
-
-def on_log(mqttc, obj, level, string):
+def on_log(obj, level, string):
     """Paho logging callback."""
     # pylint: disable=W0612,W0613
     print("Log: " + string)
-
 
 def measure_hash(sensor_id, measure_value, measure_type):
     """Create measurement JSON"""
@@ -131,14 +140,15 @@ def get_bme680_air_baseline(sensor):
         # Collect gas resistance burn-in values, then use the average
         # of the last 50 values to set the upper limit for calculating
         # gas_baseline.
-        print('Collecting gas resistance burn-in data for 5 mins\n')
+        print('Collecting gas resistance burn-in data for 5 mins')
         while curr_time - start_time < burn_in_time:
             left_time = int(burn_in_time - (curr_time - start_time))
             curr_time = time.time()
             if sensor.get_sensor_data() and sensor.data.heat_stable:
                 gas = sensor.data.gas_resistance
                 burn_in_data.append(gas)
-                print('Gas {0}: {1} Ohms'.format(left_time, gas))
+                sys.stdout.write('Gas {0}: {1} Ohms     \r'.format(left_time, round(gas, 1)))
+                sys.stdout.flush()
                 time.sleep(2)
 
         gas_baseline = sum(burn_in_data[-50:]) / 50.0
@@ -159,25 +169,25 @@ def set_bme680_config(sensor, temp_offset):
     sensor.set_gas_status(bme680.ENABLE_GAS_MEAS)
     sensor.set_temp_offset(temp_offset)
 
-    print('\n\nInitial reading:')
-    for name in dir(sensor.data):
-        value = getattr(sensor.data, name)
-
-        if not name.startswith('_'):
-            print('{}: {}'.format(name, value))
+#    print('\n\nInitial reading:')
+#    for name in dir(sensor.data):
+#      value = getattr(sensor.data, name)
+#
+#      if not name.startswith('_'):
+#          print('{}: {}'.format(name, value))
 
     sensor.set_gas_heater_temperature(320)
     sensor.set_gas_heater_duration(150)
     sensor.select_gas_heater_profile(0)
 
-    print('Calibration data:')
-    for name in dir(sensor.calibration_data):
-
-        if not name.startswith('_'):
-            value = getattr(sensor.calibration_data, name)
-
-            if isinstance(value, int):
-                print('{}: {}'.format(name, value))
+#    print('Calibration data:')
+#    for name in dir(sensor.calibration_data):
+#
+#        if not name.startswith('_'):
+#            value = getattr(sensor.calibration_data, name)
+#
+#            if isinstance(value, int):
+#                print('{}: {}'.format(name, value))
 
 
 def mainloop_bme680(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
@@ -311,13 +321,22 @@ def main(argv):
 
     mqttc.on_message = on_message
     mqttc.on_connect = on_connect
+    mqttc.on_disconnect = on_disconnect
+    mqttc.on_socket_open = on_socket_open
+    mqttc.on_socjet_close = on_socket_close
     # mqttc.on_publish = on_publish
     mqttc.on_subscribe = on_subscribe
 
     # Uncomment to enable debug messages
     # mqttc.on_log = on_log
+
     mqttc.loop_start()
-    mqttc.connect(mqtt_server, mqtt_port, 60)
+
+    try:
+        mqttc.connect(mqtt_server, mqtt_port, 60)
+    except ConnectionRefusedError:
+        print("Can't connect to " + mqtt_server + ":" + str(mqtt_port))
+
     mqtt_topic = "/sensor/voccer/2.0/"
 
     if sgp_sensor is False:
