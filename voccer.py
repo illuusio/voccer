@@ -6,6 +6,7 @@
 # SPDX-License-Identifier: MIT
 
 # pylint: disable=E0401
+import datetime
 import json
 import time
 import sys
@@ -217,8 +218,9 @@ def mainloop_bme680(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
             air_quality = measure_hash(sensor_id, round(air_quality_scr, 2),
                                        "quality")
 
-            print(
-                'Temperature: {0:.2f}C, Pressure: {1:.2f} HPa, Humidity {2:.2f} '
+            sys.stdout.write(str(datetime.datetime.now()))
+            sys.stdout.write(
+                ': Temperature: {0:.2f}C, Pressure: {1:.2f} HPa, Humidity {2:.2f} '
                 .format(sensor.data.temperature, sensor.data.pressure,
                         sensor.data.humidity))
             print(
@@ -268,7 +270,8 @@ def sgp30_mainloop(sensor_id, mqttc, mqtt_topic):
             (rtn_value, mid) = mqttc.publish(mqtt_topic + "co2", co2, qos=0)
             (rtn_value, mid) = mqttc.publish(mqtt_topic + "tvoc", tvoc, qos=0)
 
-            print("eCO2: " + str(sgp_measurements.data[0]) + " tVOC: " +
+            sys.stdout.write(str(datetime.datetime.now()))
+            print(": eCO2: " + str(sgp_measurements.data[0]) + " tVOC: " +
                   str(sgp_measurements.data[1]))
             time.sleep(10 * 60)
 
