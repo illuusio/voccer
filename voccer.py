@@ -13,48 +13,58 @@ import sys
 import getopt
 import paho.mqtt.client as mqtt
 import bme680
-from smbus2 import SMBusWrapper
+from smbus2 import SMBus
 from sgp30 import Sgp30
+
 
 def on_connect(client, userdata, flags, rc):
     """Paho Connection callback."""
     # pylint: disable=W0612,W0613
     print("Paho MQTT Connected: " + str(rc))
 
+
 def on_disconnect(client, userdata, rc):
     """Paho Disconnection callback."""
     # pylint: disable=W0612,W0613
     print("Paho MQTT Disconnected: " + str(rc))
+
 
 def on_socket_open(client, userdata, sock):
     """Paho Socket open callback."""
     # pylint: disable=W0612,W0613
     print("Paho MQTT Socket open")
 
+
 def on_socket_close(client, userdata, sock):
     """Paho Socjet close callback."""
     # pylint: disable=W0612,W0613
     print("Paho MQTT Socket close")
 
+
 def on_message(client, userdata, msg):
     """Paho Message send callback."""
     # pylint: disable=W0612,W0613
-    print("Paho MQTT Message:" + msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
+    print("Paho MQTT Message:" + msg.topic +
+          " " + str(msg.qos) + " " + str(msg.payload))
+
 
 def on_publish(client, userdata, mid):
     """Paho Message published callback."""
     # pylint: disable=W0612,W0613
     print("Paho MQTT Published: " + str(mid))
 
+
 def on_subscribe(client, mid, granted_qos):
     """Paho Server subscribe callback."""
     # pylint: disable=W0612,W0613
     print("Paho MQTT Subscribed: " + str(mid) + " " + str(granted_qos))
 
+
 def on_log(obj, level, string):
     """Paho logging callback."""
     # pylint: disable=W0612,W0613
     print("Log: " + string)
+
 
 def measure_hash(sensor_id, measure_value, measure_type):
     """Create measurement JSON"""
@@ -133,7 +143,7 @@ def get_bme680_air_baseline(sensor):
     """ Calculate Gas baseline """
     start_time = time.time()
     curr_time = time.time()
-    burn_in_time = 5 * 60
+    burn_in_time = 1 * 60
 
     burn_in_data = []
 
@@ -191,89 +201,114 @@ def set_bme680_config(sensor, temp_offset):
 #                print('{}: {}'.format(name, value))
 
 
-def mainloop_bme680(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
+def bme680_step(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
     """ Main loop to run Bosch BME680 sensor """
     # pylint: disable=W0612,W0613
 
     # Set the humidity baseline to 40%, an optimal indoor humidity.
     hum_baseline = 40.0
 
-    print('Gas baseline: {0} Ohms, humidity baseline: {1:.2f} %RH\n'.format(
-        gas_baseline, hum_baseline))
+    if sensor is None:
+        return False
 
-    while True:
-        if sensor.get_sensor_data():
-            temperature = measure_hash(sensor_id,
-                                       round(sensor.data.temperature, 2),
-                                       "temperature")
-            pressure = measure_hash(sensor_id, int(sensor.data.pressure),
-                                    "pressure")
-            humidity = measure_hash(sensor_id, int(sensor.data.humidity),
-                                    "humidity")
-            gas = measure_hash(sensor_id, round(sensor.data.gas_resistance, 2),
-                               "gas")
+    if sensor.get_sensor_data():
+        temperature = measure_hash(sensor_id,
+                                   round(sensor.data.temperature, 2),
+                                   "temperature")
+        pressure = measure_hash(sensor_id, int(sensor.data.pressure),
+                                "pressure")
+        humidity = measure_hash(sensor_id, int(sensor.data.humidity),
+                                "humidity")
+        gas = measure_hash(sensor_id, round(sensor.data.gas_resistance, 2),
+                           "gas")
 
-            air_quality_scr = air_quality_score(sensor, gas_baseline,
-                                                hum_baseline)
-            air_quality = measure_hash(sensor_id, round(air_quality_scr, 2),
-                                       "quality")
+        air_quality_scr = air_quality_score(sensor, gas_baseline,
+                                            hum_baseline)
+        air_quality = measure_hash(sensor_id, round(air_quality_scr, 2),
+                                   "quality")
 
-            sys.stdout.write(str(datetime.datetime.now()))
-            sys.stdout.write(
-                ': Temperature: {0:.2f}C, Pressure: {1:.2f} HPa, Humidity {2:.2f} '
-                .format(sensor.data.temperature, sensor.data.pressure,
-                        sensor.data.humidity))
-            print(
-                '%RH, Resistance: {0:.2f} Ohm, Quality Indx {1:.2f}\n'.format(
-                    sensor.data.gas_resistance, air_quality_scr))
+        sys.stdout.write(str(datetime.datetime.now()))
+        sys.stdout.write(
+            ': Temperature: {0:.2f}C, Pressure: {1:.2f} HPa, Humidity {2:.2f} '
+            .format(sensor.data.temperature, sensor.data.pressure,
+                    sensor.data.humidity))
+        print(
+            '%RH, Resistance: {0:.2f} Ohm, Quality Indx {1:.2f}\n'.format(
+                sensor.data.gas_resistance, air_quality_scr))
 
-            (rtn_value, mid) = mqttc.publish(
-                mqtt_topic + "temperature", temperature, qos=0)
+        (rtn_value, mid) = mqttc.publish(
+            mqtt_topic + "temperature", temperature, qos=0)
 
-            (rtn_value, mid) = mqttc.publish(
-                mqtt_topic + "pressure", pressure, qos=0)
+        (rtn_value, mid) = mqttc.publish(
+            mqtt_topic + "pressure", pressure, qos=0)
 
-            (rtn_value, mid) = mqttc.publish(
-                mqtt_topic + "humidity", humidity, qos=0)
+        (rtn_value, mid) = mqttc.publish(
+            mqtt_topic + "humidity", humidity, qos=0)
 
-            (rtn_value, mid) = mqttc.publish(mqtt_topic + "gas", gas, qos=0)
+        (rtn_value, mid) = mqttc.publish(mqtt_topic + "gas", gas, qos=0)
 
-            (rtn_value, mid) = mqttc.publish(
-                mqtt_topic + "quality", air_quality, qos=0)
+        (rtn_value, mid) = mqttc.publish(
+            mqtt_topic + "quality", air_quality, qos=0)
 
-        time.sleep(10 * 60)
+    return True
+
+def get_SMBus():
+    """ Mainly needed by SGP30 to operate in SMBus (I2C) """
+    return SMBus(bus=1, force=0)
 
 
-def sgp30_mainloop(sensor_id, mqttc, mqtt_topic):
+def set_sgp30_baseline(bus, file="/tmp/mySGP30_baseline"):
+    """ Baseline initialization """
+    sgp = Sgp30(
+         bus, baseline_filename=file
+    )  # things thing with the baselinefile is dumb and will be changed in the future
+    # print("resetting all i2c devices")
+
+    sgp.i2c_geral_call(
+    )  # WARNING: Will reset any device on teh i2cbus that listens for general call
+
+    # print(sgp.read_features())
+    # print(sgp.read_serial())
+    sgp.init_sgp()
+
+    return sgp
+
+def sgp30_step(sensor, sensor_id, mqttc, mqtt_topic):
     """ Main loop to run SGP30 sensor """
     # pylint: disable=W0612,W0613
-    with SMBusWrapper(1) as bus:
-        sgp = Sgp30(
-            bus, baseline_filename="/tmp/mySGP30_baseline"
-        )  #things thing with the baselinefile is dumb and will be changed in the future
-        print("resetting all i2c devices")
 
-        sgp.i2c_geral_call(
-        )  #WARNING: Will reset any device on teh i2cbus that listens for general call
+    if sensor is None:
+        return False
 
-        print(sgp.read_features())
-        print(sgp.read_serial())
-        sgp.init_sgp()
+    sgp_measurements = sensor.read_measurements()
 
-        while True:
-            sgp_measurements = sgp.read_measurements()
+    co2 = measure_hash(sensor_id, int(sgp_measurements.data[0]), "co2")
+    tvoc = measure_hash(sensor_id, int(sgp_measurements.data[1]),
+                        "voc")
 
-            co2 = measure_hash(sensor_id, int(sgp_measurements.data[0]), "co2")
-            tvoc = measure_hash(sensor_id, int(sgp_measurements.data[1]),
-                                "voc")
+    (rtn_value, mid) = mqttc.publish(mqtt_topic + "co2", co2, qos=0)
+    (rtn_value, mid) = mqttc.publish(mqtt_topic + "tvoc", tvoc, qos=0)
 
-            (rtn_value, mid) = mqttc.publish(mqtt_topic + "co2", co2, qos=0)
-            (rtn_value, mid) = mqttc.publish(mqtt_topic + "tvoc", tvoc, qos=0)
+    sys.stdout.write(str(datetime.datetime.now()))
+    print(": eCO2: " + str(sgp_measurements.data[0]) + " tVOC: " +
+          str(sgp_measurements.data[1]))
 
-            sys.stdout.write(str(datetime.datetime.now()))
-            print(": eCO2: " + str(sgp_measurements.data[0]) + " tVOC: " +
-                  str(sgp_measurements.data[1]))
-            time.sleep(10 * 60)
+    return True
+
+
+def mainloop(sensor_bme680_first, sensor_bme680_first_gas_baseline,
+             sensor_bme680_second, sensor_bme680_second_gas_baseline,
+             sensor_sgp30_first, sensor_id, mqttc, mqtt_topic):
+    """ Main loop to sensors """
+    # pylint: disable=W0612,W0613
+
+    while True:
+        bme680_step(sensor_bme680_first, sensor_id,
+                    mqttc, mqtt_topic, sensor_bme680_first_gas_baseline)
+        bme680_step(sensor_bme680_second, (sensor_id + 1),
+                    mqttc, mqtt_topic, sensor_bme680_second_gas_baseline)
+        sgp30_step(sensor_sgp30_first, (sensor_id + 2), mqttc, mqtt_topic)
+        time.sleep(10 * 60)
 
 
 def main(argv):
@@ -283,12 +318,14 @@ def main(argv):
     bme680_addr = bme680.I2C_ADDR_PRIMARY
     mqtt_server = "localhost"
     mqtt_port = 1883
-    sgp_sensor = False
+    sgp30_sensor = False
+    bme680_sensor_first = False
+    bme680_sensor_second = False
     temp_offset = 0
 
     try:
-        opts, args = getopt.getopt(argv, "hs:fm:p:gt:", [
-            "sensorid=", "bme680second", "mqttserver", "mqttport", "sgp30",
+        opts, args = getopt.getopt(argv, "hs:bfm:p:gt:", [
+            "help", "sensorid=", "bme680", "bme680second", "mqttserver", "mqttport", "sgp30",
             "tempoffset"
         ])
     except getopt.GetoptError:
@@ -296,8 +333,9 @@ def main(argv):
         print('be Bosch BME680 available in I2C addr 0x76)')
         print('Parameters:')
         print('  --sensorid (-s) Sensor id')
+        print('  --bme680 (-b) Use BME680 sensor')
         print('  --bme680second (-f) If there is second BME680 available in 0x77')
-        print('  --sgp30 (-g) Use Sensirion SGP30 not BME680')
+        print('  --sgp30 (-g) Use Sensirion SGP30')
         print('  --tempoffset (-t) How much is temperature offset (+/-)')
         print('  --mqttserver (-m) MQTT server location (default: localhost)')
         print('  --mqttport (-p) MQTT server port (default: 1883)')
@@ -309,10 +347,12 @@ def main(argv):
             sys.exit()
         elif opt in ("-s", "--sensorid"):
             sensor_id = int(arg)
+        elif opt in ("-b", "--bme680"):
+            bme680_sensor_first = True
         elif opt in ("-f", "--bme680second"):
-            bme680_addr = bme680.I2C_ADDR_SECONDARY
+            bme680_sensor_second = True
         elif opt in ("-g", "--sgp30"):
-            sgp_sensor = True
+            sgp30_sensor = True
         elif opt in ("-m", "--mqttserver"):
             mqtt_server = arg
         elif opt in ("-p", "--mqttport"):
@@ -341,27 +381,45 @@ def main(argv):
         print("Can't connect to " + mqtt_server + ":" + str(mqtt_port))
 
     mqtt_topic = "/sensor/voccer/2.0/"
+    sensor_bme680_first = None
+    sensor_bme680_first_gas_baseline = None
+    sensor_bme680_second = None
+    sensor_bme680_second_gas_baseline = None
+    sensor_sgp30_first = None
+    sensor_sgp30_first_bus = None
 
-    if sgp_sensor is False:
+    if sgp30_sensor is True:
+        sensor_sgp30_first_bus = get_SMBus()
+        sensor_sgp30_first = set_sgp30_baseline(sensor_sgp30_first_bus)
+
+    if bme680_sensor_first is True:
         try:
-            sensor = bme680.BME680(bme680_addr)
+            sensor_bme680_first = bme680.BME680(bme680.I2C_ADDR_PRIMARY)
+            set_bme680_config(sensor_bme680_first, temp_offset)
+            sensor_bme680_first_gas_baseline = get_bme680_air_baseline(sensor_bme680_first)
         except IOError as execption_str:
             print("Can't open BME680 at I2C addr: "
-                  + str(hex(bme680_addr)) + " (" + str(execption_str) + ")")
+                  + str(hex(bme680.I2C_ADDR_PRIMARY)) + " (" + str(execption_str) + ")")
             sys.exit(2)
-    else:
-        sgp30_mainloop(sensor_id, mqttc, mqtt_topic)
-        sys.exit(0)
 
-    set_bme680_config(sensor, temp_offset)
+    if bme680_sensor_second is True:
+        try:
+            sensor_bme680_second = bme680.BME680(bme680.I2C_ADDR_SECONDARY)
+            set_bme680_config(sensor_bme680_second, temp_offset)
+            sensor_bme680_second_gas_baseline = get_bme680_air_baseline(sensor_bme680_second)
+        except IOError as execption_str:
+            print("Can't open BME680 at I2C addr: "
+                  + str(hex(bme680.I2C_ADDR_SECONDARY)) + " (" + str(execption_str) + ")")
+            sys.exit(2)
 
     try:
-        gas_baseline = get_bme680_air_baseline(sensor)
-
-        mainloop_bme680(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline)
+        mainloop(sensor_bme680_first, sensor_bme680_first_gas_baseline,
+                 sensor_bme680_second, sensor_bme680_second_gas_baseline,
+                 sensor_sgp30_first, sensor_id, mqttc, mqtt_topic)
     except KeyboardInterrupt:
         pass
 
 
 if __name__ == '__main__':
     main(sys.argv[1:])
+
