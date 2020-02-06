@@ -17,9 +17,9 @@ import bme680
 from smbus2 import SMBus
 from sgp30 import Sgp30
 
+
 class Voccer:
     """Voccer class"""
-
     def __init__(self, logger, mqtt_server, mqtt_port):
         self.logger = logger
         self.sensor = {}
@@ -63,31 +63,26 @@ class Voccer:
         # pylint: disable=W0612,W0613,C0103
         self.logger.debug("Paho MQTT Connected: " + str(rc))
 
-
     def on_disconnect(self, client, userdata, rc):
         """Paho Disconnection callback."""
         # pylint: disable=W0612,W0613,C0103
         self.logger.debug("Paho MQTT Disconnected: " + str(rc))
-
 
     def on_socket_open(self, client, userdata, sock):
         """Paho Socket open callback."""
         # pylint: disable=W0612,W0613
         self.logger.debug("Paho MQTT Socket open")
 
-
     def on_socket_close(self, client, userdata, sock):
         """Paho Socjet close callback."""
         # pylint: disable=W0612,W0613
         self.logger.debug("Paho MQTT Socket close")
 
-
     def on_message(self, client, userdata, msg):
         """Paho Message send callback."""
         # pylint: disable=W0612,W0613
-        self.logger.debug("Paho MQTT Message:" + msg.topic +
-                          " " + str(msg.qos) + " " + str(msg.payload))
-
+        self.logger.debug("Paho MQTT Message:" + msg.topic + " " +
+                          str(msg.qos) + " " + str(msg.payload))
 
     def on_publish(self, client, userdata, mid):
         """Paho Message published callback."""
@@ -97,15 +92,13 @@ class Voccer:
     def on_subscribe(self, client, mid, granted_qos):
         """Paho Server subscribe callback."""
         # pylint: disable=W0612,W0613
-        self.logger.debug("Paho MQTT Subscribed: " + str(mid) +
-                          " " + str(granted_qos))
-
+        self.logger.debug("Paho MQTT Subscribed: " + str(mid) + " " +
+                          str(granted_qos))
 
     def on_log(self, obj, level, string):
         """Paho logging callback."""
         # pylint: disable=W0612,W0613
         self.logger.debug("Log: " + string)
-
 
     def measure_hash(self, sensor_id, measure_value, measure_type):
         """Create measurement JSON"""
@@ -142,7 +135,6 @@ class Voccer:
             'typeid': typeid,
             'unitid': unitid
         })
-
 
     def air_quality_score(self, sensor, gas_baseline, hum_baseline):
         """Calculate air quality score from BME680 or else"""
@@ -181,7 +173,6 @@ class Voccer:
 
         return 0
 
-
     def get_bme680_air_baseline(self, sensor):
         """ Calculate Gas baseline """
         start_time = time.time()
@@ -194,21 +185,22 @@ class Voccer:
             # Collect gas resistance burn-in values, then use the average
             # of the last 50 values to set the upper limit for calculating
             # gas_baseline.
-            self.logger.debug('BME680: Collecting gas resistance burn-in data for 5 mins')
+            self.logger.debug(
+                'BME680: Collecting gas resistance burn-in data for 5 mins')
             while curr_time - start_time < burn_in_time:
                 left_time = int(burn_in_time - (curr_time - start_time))
                 curr_time = time.time()
                 if sensor.get_sensor_data() and sensor.data.heat_stable:
                     gas = sensor.data.gas_resistance
                     burn_in_data.append(gas)
-                    self.logger.debug('BME680: Gas {0}: {1} Ohms'.format(left_time, round(gas, 1)))
+                    self.logger.debug('BME680: Gas {0}: {1} Ohms'.format(
+                        left_time, round(gas, 1)))
                     time.sleep(2)
 
             gas_baseline = sum(burn_in_data[-50:]) / 50.0
         except KeyboardInterrupt:
             pass
         return gas_baseline
-
 
     def set_bme680_config(self, sensor, temp_offset):
         """ Function to set confis for BOSCH BME680
@@ -223,12 +215,12 @@ class Voccer:
         sensor.set_gas_status(bme680.ENABLE_GAS_MEAS)
         sensor.set_temp_offset(temp_offset)
 
-    #    self.logger.debug('\n\nInitial reading:')
-    #    for name in dir(sensor.data):
-    #      value = getattr(sensor.data, name)
-    #
-    #      if not name.startswith('_'):
-    #          self.logger.debug('{}: {}'.format(name, value))
+        #    self.logger.debug('\n\nInitial reading:')
+        #    for name in dir(sensor.data):
+        #      value = getattr(sensor.data, name)
+        #
+        #      if not name.startswith('_'):
+        #          self.logger.debug('{}: {}'.format(name, value))
 
         sensor.set_gas_heater_temperature(320)
         sensor.set_gas_heater_duration(150)
@@ -247,17 +239,17 @@ class Voccer:
         """ init Bosch BME680 sensor """
         try:
             self.sensor['bme680'][name]['sensor'] = bme680.BME680(addr)
-            self.set_bme680_config(self.sensor['bme680'][name]['sensor'], temp_offset)
-            self.sensor['bme680'][name]['baseline'] = self.get_bme680_air_baseline(
-                self.sensor['bme680'][name]['sensor']
-            )
+            self.set_bme680_config(self.sensor['bme680'][name]['sensor'],
+                                   temp_offset)
+            self.sensor['bme680'][name][
+                'baseline'] = self.get_bme680_air_baseline(
+                    self.sensor['bme680'][name]['sensor'])
         except IOError as execption_str:
-            print("Can't open BME680 at I2C addr: "
-                  + str(hex(addr)) + " (" + str(execption_str) + ")")
+            print("Can't open BME680 at I2C addr: " + str(hex(addr)) + " (" +
+                  str(execption_str) + ")")
             return False
 
         return True
-
 
     def bme680_step(self, sensor, sensor_id, gas_baseline):
         """ Main loop step for Bosch BME680 sensor """
@@ -277,34 +269,44 @@ class Voccer:
                                          "pressure")
             humidity = self.measure_hash(sensor_id, int(sensor.data.humidity),
                                          "humidity")
-            gas = self.measure_hash(sensor_id, round(sensor.data.gas_resistance, 2),
+            gas = self.measure_hash(sensor_id,
+                                    round(sensor.data.gas_resistance, 2),
                                     "gas")
 
             air_quality_scr = self.air_quality_score(sensor, gas_baseline,
                                                      hum_baseline)
-            air_quality = self.measure_hash(sensor_id, round(air_quality_scr, 2),
-                                            "quality")
+            air_quality = self.measure_hash(sensor_id,
+                                            round(air_quality_scr,
+                                                  2), "quality")
 
             self.logger.debug(
-                'BME680: Temperature: {0:.2f}C, Pressure: {1:.2f} HPa'
-                .format(sensor.data.temperature, sensor.data.pressure))
+                'BME680: Temperature: {0:.2f}C, Pressure: {1:.2f} HPa'.format(
+                    sensor.data.temperature, sensor.data.pressure))
             self.logger.debug(
                 'BME680: Humidity {2:.2f} %RH, Resistance: {0:.2f} Ohm Quality Indx {1:.2f}'
-                .format(sensor.data.humidity, sensor.data.gas_resistance, air_quality_scr))
+                .format(sensor.data.humidity, sensor.data.gas_resistance,
+                        air_quality_scr))
 
-            (rtn_value, mid) = self.mqttc.publish(
-                self.mqtt_topic + "temperature", temperature, qos=0)
+            (rtn_value,
+             mid) = self.mqttc.publish(self.mqtt_topic + "temperature",
+                                       temperature,
+                                       qos=0)
 
-            (rtn_value, mid) = self.mqttc.publish(
-                self.mqtt_topic + "pressure", pressure, qos=0)
+            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "pressure",
+                                                  pressure,
+                                                  qos=0)
 
-            (rtn_value, mid) = self.mqttc.publish(
-                self.mqtt_topic + "humidity", humidity, qos=0)
+            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "humidity",
+                                                  humidity,
+                                                  qos=0)
 
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "gas", gas, qos=0)
+            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "gas",
+                                                  gas,
+                                                  qos=0)
 
-            (rtn_value, mid) = self.mqttc.publish(
-                self.mqtt_topic + "quality", air_quality, qos=0)
+            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "quality",
+                                                  air_quality,
+                                                  qos=0)
 
         return True
 
@@ -312,7 +314,6 @@ class Voccer:
         """ Mainly needed by SGP30 to operate in SMBus (I2C) """
         # pylint: disable=R0201
         return SMBus(bus=1, force=0)
-
 
     def set_sgp30_baseline(self, bus, file="/tmp/mySGP30_baseline"):
         """ Baseline initialization """
@@ -332,8 +333,8 @@ class Voccer:
     def init_sgp30(self):
         """ Init SGP30 sensor """
         self.sensor['sgp30']['bus'] = self.get_smbus()
-        self.sensor['sgp30']['sensor'] = self.set_sgp30_baseline(self.sensor['sgp30']['bus'])
-
+        self.sensor['sgp30']['sensor'] = self.set_sgp30_baseline(
+            self.sensor['sgp30']['bus'])
 
     def sgp30_step(self, sensor, sensor_id):
         """ Main loop step for SGP30 sensor """
@@ -344,28 +345,34 @@ class Voccer:
 
         sgp_measurements = sensor.read_measurements()
 
-        co2 = self.measure_hash(sensor_id, int(sgp_measurements.data[0]), "co2")
+        co2 = self.measure_hash(sensor_id, int(sgp_measurements.data[0]),
+                                "co2")
         tvoc = self.measure_hash(sensor_id, int(sgp_measurements.data[1]),
                                  "voc")
 
-        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "co2", co2, qos=0)
-        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "tvoc", tvoc, qos=0)
+        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "co2",
+                                              co2,
+                                              qos=0)
+        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "tvoc",
+                                              tvoc,
+                                              qos=0)
 
         sys.stdout.write(str(datetime.datetime.now()))
-        self.logger.debug("SGP30: eCO2: " + str(sgp_measurements.data[0]) + " tVOC: "
-                          + str(sgp_measurements.data[1]))
+        self.logger.debug("SGP30: eCO2: " + str(sgp_measurements.data[0]) +
+                          " tVOC: " + str(sgp_measurements.data[1]))
 
         return True
-
 
     def mainloop(self, sensor_id):
         """ Main loop to sensors """
         # pylint: disable=W0612,W0613
 
         while True:
-            self.bme680_step(self.sensor['bme680']['first']['sensor'], sensor_id,
+            self.bme680_step(self.sensor['bme680']['first']['sensor'],
+                             sensor_id,
                              self.sensor['bme680']['first']['baseline'])
-            self.bme680_step(self.sensor['bme680']['second']['sensor'], (sensor_id + 1),
+            self.bme680_step(self.sensor['bme680']['second']['sensor'],
+                             (sensor_id + 1),
                              self.sensor['bme680']['second']['baseline'])
             self.sgp30_step(self.sensor['sgp30']['sensor'], (sensor_id + 2))
             time.sleep(10 * 60)
@@ -391,8 +398,8 @@ def main(argv):
 
     try:
         opts, args = getopt.getopt(argv, "hs:bfm:p:gt:v", [
-            "help", "sensorid=", "bme680", "bme680second", "mqttserver", "mqttport", "sgp30",
-            "tempoffset", "verbose"
+            "help", "sensorid=", "bme680", "bme680second", "mqttserver",
+            "mqttport", "sgp30", "tempoffset", "verbose"
         ])
     except getopt.GetoptError:
         print('voccer.py (without parameters there should')
@@ -400,7 +407,9 @@ def main(argv):
         print('Parameters:')
         print('  --sensorid (-s) Sensor id')
         print('  --bme680 (-b) Use BME680 sensor')
-        print('  --bme680second (-f) If there is second BME680 available in 0x77')
+        print(
+            '  --bme680second (-f) If there is second BME680 available in 0x77'
+        )
         print('  --sgp30 (-g) Use Sensirion SGP30')
         print('  --tempoffset (-t) How much is temperature offset (+/-)')
         print('  --mqttserver (-m) MQTT server location (default: localhost)')
@@ -440,7 +449,8 @@ def main(argv):
         voccer_class.init_bme680(bme680.I2C_ADDR_PRIMARY, "first", temp_offset)
 
     if sensors['bme680_second'] is True:
-        voccer_class.init_bme680(bme680.I2C_ADDR_SECONDARY, "second", temp_offset)
+        voccer_class.init_bme680(bme680.I2C_ADDR_SECONDARY, "second",
+                                 temp_offset)
 
     try:
         voccer_class.mainloop(sensor_id)
