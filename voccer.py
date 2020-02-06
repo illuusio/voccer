@@ -9,6 +9,7 @@
 import datetime
 import json
 import time
+import logging
 import sys
 import getopt
 import paho.mqtt.client as mqtt
@@ -16,54 +17,62 @@ import bme680
 from smbus2 import SMBus
 from sgp30 import Sgp30
 
+LOGGER = logging.getLogger(__name__)
 
 def on_connect(client, userdata, flags, rc):
     """Paho Connection callback."""
     # pylint: disable=W0612,W0613
-    print("Paho MQTT Connected: " + str(rc))
+    global LOGGER
+    LOGGER.debug("Paho MQTT Connected: " + str(rc))
 
 
 def on_disconnect(client, userdata, rc):
     """Paho Disconnection callback."""
     # pylint: disable=W0612,W0613
-    print("Paho MQTT Disconnected: " + str(rc))
+    global LOGGER
+    LOGGER.debug("Paho MQTT Disconnected: " + str(rc))
 
 
 def on_socket_open(client, userdata, sock):
     """Paho Socket open callback."""
     # pylint: disable=W0612,W0613
-    print("Paho MQTT Socket open")
+    global LOGGER
+    LOGGER.debug("Paho MQTT Socket open")
 
 
 def on_socket_close(client, userdata, sock):
     """Paho Socjet close callback."""
     # pylint: disable=W0612,W0613
-    print("Paho MQTT Socket close")
+    global LOGGER
+    LOGGER.debug("Paho MQTT Socket close")
 
 
 def on_message(client, userdata, msg):
     """Paho Message send callback."""
     # pylint: disable=W0612,W0613
-    print("Paho MQTT Message:" + msg.topic +
-          " " + str(msg.qos) + " " + str(msg.payload))
+    global LOGGER
+    LOGGER.debug("Paho MQTT Message:" + msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
 
 
 def on_publish(client, userdata, mid):
     """Paho Message published callback."""
     # pylint: disable=W0612,W0613
-    print("Paho MQTT Published: " + str(mid))
+    global LOGGER
+    LOGGER.debug("Paho MQTT Published: " + str(mid))
 
 
 def on_subscribe(client, mid, granted_qos):
     """Paho Server subscribe callback."""
     # pylint: disable=W0612,W0613
-    print("Paho MQTT Subscribed: " + str(mid) + " " + str(granted_qos))
+    global LOGGER
+    LOGGER.debug("Paho MQTT Subscribed: " + str(mid) + " " + str(granted_qos))
 
 
 def on_log(obj, level, string):
     """Paho logging callback."""
     # pylint: disable=W0612,W0613
-    print("Log: " + string)
+    global LOGGER
+    LOGGER.debug("Log: " + string)
 
 
 def measure_hash(sensor_id, measure_value, measure_type):
@@ -143,7 +152,8 @@ def get_bme680_air_baseline(sensor):
     """ Calculate Gas baseline """
     start_time = time.time()
     curr_time = time.time()
-    burn_in_time = 1 * 60
+    burn_in_time = 5 * 60
+    global LOGGER
 
     burn_in_data = []
 
@@ -151,15 +161,14 @@ def get_bme680_air_baseline(sensor):
         # Collect gas resistance burn-in values, then use the average
         # of the last 50 values to set the upper limit for calculating
         # gas_baseline.
-        print('Collecting gas resistance burn-in data for 5 mins')
+        LOGGER.debug('BME680: Collecting gas resistance burn-in data for 5 mins')
         while curr_time - start_time < burn_in_time:
             left_time = int(burn_in_time - (curr_time - start_time))
             curr_time = time.time()
             if sensor.get_sensor_data() and sensor.data.heat_stable:
                 gas = sensor.data.gas_resistance
                 burn_in_data.append(gas)
-                sys.stdout.write('Gas {0}: {1} Ohms     \r'.format(left_time, round(gas, 1)))
-                sys.stdout.flush()
+                LOGGER.debug('BME680: Gas {0}: {1} Ohms'.format(left_time, round(gas, 1)))
                 time.sleep(2)
 
         gas_baseline = sum(burn_in_data[-50:]) / 50.0
@@ -173,6 +182,8 @@ def set_bme680_config(sensor, temp_offset):
         These oversampling settings can be tweaked to
         change the balance between accuracy and noise in
         the data """
+#   global LOGGER
+
     sensor.set_humidity_oversample(bme680.OS_2X)
     sensor.set_pressure_oversample(bme680.OS_4X)
     sensor.set_temperature_oversample(bme680.OS_8X)
@@ -180,25 +191,25 @@ def set_bme680_config(sensor, temp_offset):
     sensor.set_gas_status(bme680.ENABLE_GAS_MEAS)
     sensor.set_temp_offset(temp_offset)
 
-#    print('\n\nInitial reading:')
+#    LOGGER.debug('\n\nInitial reading:')
 #    for name in dir(sensor.data):
 #      value = getattr(sensor.data, name)
 #
 #      if not name.startswith('_'):
-#          print('{}: {}'.format(name, value))
+#          LOGGER.debug('{}: {}'.format(name, value))
 
     sensor.set_gas_heater_temperature(320)
     sensor.set_gas_heater_duration(150)
     sensor.select_gas_heater_profile(0)
 
-#    print('Calibration data:')
+#    LOGGER.debug('Calibration data:')
 #    for name in dir(sensor.calibration_data):
 #
 #        if not name.startswith('_'):
 #            value = getattr(sensor.calibration_data, name)
 #
 #            if isinstance(value, int):
-#                print('{}: {}'.format(name, value))
+#                LOGGER.debug('{}: {}'.format(name, value))
 
 
 def bme680_step(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
@@ -207,6 +218,7 @@ def bme680_step(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
 
     # Set the humidity baseline to 40%, an optimal indoor humidity.
     hum_baseline = 40.0
+    global LOGGER
 
     if sensor is None:
         return False
@@ -227,14 +239,12 @@ def bme680_step(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
         air_quality = measure_hash(sensor_id, round(air_quality_scr, 2),
                                    "quality")
 
-        sys.stdout.write(str(datetime.datetime.now()))
-        sys.stdout.write(
-            ': Temperature: {0:.2f}C, Pressure: {1:.2f} HPa, Humidity {2:.2f} '
-            .format(sensor.data.temperature, sensor.data.pressure,
-                    sensor.data.humidity))
-        print(
-            '%RH, Resistance: {0:.2f} Ohm, Quality Indx {1:.2f}\n'.format(
-                sensor.data.gas_resistance, air_quality_scr))
+        LOGGER.debug(
+            'BME680: Temperature: {0:.2f}C, Pressure: {1:.2f} HPa'
+            .format(sensor.data.temperature, sensor.data.pressure))
+        LOGGER.debug(
+            'BME680: Humidity {2:.2f} %RH, Resistance: {0:.2f} Ohm, Quality Indx {1:.2f}'.format(
+                sensor.data.humidity, sensor.data.gas_resistance, air_quality_scr))
 
         (rtn_value, mid) = mqttc.publish(
             mqtt_topic + "temperature", temperature, qos=0)
@@ -252,23 +262,22 @@ def bme680_step(sensor, sensor_id, mqttc, mqtt_topic, gas_baseline):
 
     return True
 
-def get_SMBus():
+def get_smbus():
     """ Mainly needed by SGP30 to operate in SMBus (I2C) """
     return SMBus(bus=1, force=0)
 
 
 def set_sgp30_baseline(bus, file="/tmp/mySGP30_baseline"):
     """ Baseline initialization """
-    sgp = Sgp30(
-         bus, baseline_filename=file
-    )  # things thing with the baselinefile is dumb and will be changed in the future
-    # print("resetting all i2c devices")
+    # global LOGGER
 
-    sgp.i2c_geral_call(
-    )  # WARNING: Will reset any device on teh i2cbus that listens for general call
+    sgp = Sgp30(bus, baseline_filename=file)
+    # LOGGER.debug("resetting all i2c devices")
 
-    # print(sgp.read_features())
-    # print(sgp.read_serial())
+    sgp.i2c_geral_call()
+
+    # LOGGER.debug(sgp.read_features())
+    # LOGGER.debug(sgp.read_serial())
     sgp.init_sgp()
 
     return sgp
@@ -276,6 +285,7 @@ def set_sgp30_baseline(bus, file="/tmp/mySGP30_baseline"):
 def sgp30_step(sensor, sensor_id, mqttc, mqtt_topic):
     """ Main loop to run SGP30 sensor """
     # pylint: disable=W0612,W0613
+    global LOGGER
 
     if sensor is None:
         return False
@@ -290,8 +300,8 @@ def sgp30_step(sensor, sensor_id, mqttc, mqtt_topic):
     (rtn_value, mid) = mqttc.publish(mqtt_topic + "tvoc", tvoc, qos=0)
 
     sys.stdout.write(str(datetime.datetime.now()))
-    print(": eCO2: " + str(sgp_measurements.data[0]) + " tVOC: " +
-          str(sgp_measurements.data[1]))
+    LOGGER.debug("SGP30: eCO2: " + str(sgp_measurements.data[0]) + " tVOC: "
+                 + str(sgp_measurements.data[1]))
 
     return True
 
@@ -323,10 +333,16 @@ def main(argv):
     bme680_sensor_second = False
     temp_offset = 0
 
+    global LOGGER
+
+    debug_handler = logging.StreamHandler(sys.stderr)
+    formatter = logging.Formatter('%(asctime)s (%(levelname)s): %(message)s')
+    debug_handler.setFormatter(formatter)
+
     try:
-        opts, args = getopt.getopt(argv, "hs:bfm:p:gt:", [
+        opts, args = getopt.getopt(argv, "hs:bfm:p:gt:v", [
             "help", "sensorid=", "bme680", "bme680second", "mqttserver", "mqttport", "sgp30",
-            "tempoffset"
+            "tempoffset", "verbose"
         ])
     except getopt.GetoptError:
         print('voccer.py (without parameters there should')
@@ -339,6 +355,7 @@ def main(argv):
         print('  --tempoffset (-t) How much is temperature offset (+/-)')
         print('  --mqttserver (-m) MQTT server location (default: localhost)')
         print('  --mqttport (-p) MQTT server port (default: 1883)')
+        print('  --verbose (-v) Enable debug priting')
         sys.exit(2)
 
     for opt, arg in opts:
@@ -359,7 +376,11 @@ def main(argv):
             mqtt_port = int(arg)
         elif opt in ("-t", "--tempoffset"):
             temp_offset = float(arg)
+        elif opt in ("-v", "--verbose"):
+            LOGGER.setLevel(logging.DEBUG)
+            debug_handler.setLevel(logging.DEBUG)
 
+    LOGGER.addHandler(debug_handler)
     mqttc = mqtt.Client()
 
     mqttc.on_message = on_message
@@ -389,7 +410,7 @@ def main(argv):
     sensor_sgp30_first_bus = None
 
     if sgp30_sensor is True:
-        sensor_sgp30_first_bus = get_SMBus()
+        sensor_sgp30_first_bus = get_smbus()
         sensor_sgp30_first = set_sgp30_baseline(sensor_sgp30_first_bus)
 
     if bme680_sensor_first is True:
@@ -422,4 +443,3 @@ def main(argv):
 
 if __name__ == '__main__':
     main(sys.argv[1:])
-
