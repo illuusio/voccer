@@ -18,23 +18,281 @@ from smbus2 import SMBus
 from sgp30 import Sgp30
 
 
+class BaseSensor:
+    """ Base sensor class """
+    def __init__(self, logger, mqttc, id):
+        self.logger = logger
+        self.mqttc = mqttc
+        self.id = id
+        self.mqtt_topic = "/sensor/voccer/2.0/"
+
+    def measure_hash(self, sensor_id, measure_value, measure_type):
+        """Create measurement JSON"""
+        # pylint: disable=R0201
+        typeid = 100
+        unitid = 100
+        if measure_type == "voc":
+            typeid = 105
+            unitid = 105
+        elif measure_type == "temperature":
+            typeid = 100
+            unitid = 100
+        elif measure_type == "humidity":
+            typeid = 101
+            unitid = 101
+        elif measure_type == "pressure":
+            typeid = 102
+            unitid = 102
+        elif measure_type == "quality":
+            typeid = 103
+            unitid = 103
+        elif measure_type == "gas":
+            typeid = 104
+            unitid = 104
+        elif measure_type == "co2":
+            typeid = 106
+            unitid = 106
+
+        return json.dumps({
+            'timestamp': round(time.time(), 2),
+            'id': int(sensor_id),
+            'value': measure_value,
+            'type': measure_type,
+            'typeid': typeid,
+            'unitid': unitid
+        })
+
+
+class BME680Sensor(BaseSensor):
+    """ BME680 sensor class """
+    def __init__(self, logger, mqttc, id, addr, temp_offset):
+        super().__init__(logger, mqttc, id)
+        self.addr = addr
+        self.temp_offset = temp_offset
+        self.sensor = bme680.BME680(addr)
+        self.config(temp_offset)
+        self.gas_baseline = self.get_gas_baseline()
+
+    def air_quality_score(self, sensor, gas_baseline, hum_baseline):
+        """Calculate air quality score from BME680 or else"""
+        # pylint: disable=R0201
+        # This sets the balance between humidity and gas reading in the
+        # calculation of air_quality_score (25:75, humidity:gas)
+        hum_weighting = 0.25
+
+        sensor.get_sensor_data()
+
+        if sensor.get_sensor_data() and sensor.data.heat_stable:
+            gas = sensor.data.gas_resistance
+            gas_offset = gas_baseline - gas
+            hum = sensor.data.humidity
+            hum_offset = hum - hum_baseline
+
+            # Calculate hum_score as the distance from the hum_baseline.
+            if hum_offset > 0:
+                hum_score = (100 - hum_baseline - hum_offset)
+                hum_score /= (100 - hum_baseline)
+                hum_score *= (hum_weighting * 100)
+            else:
+                hum_score = (hum_baseline + hum_offset)
+                hum_score /= hum_baseline
+                hum_score *= (hum_weighting * 100)
+
+            # Calculate gas_score as the distance from the gas_baseline.
+            if gas_offset > 0:
+                gas_score = (gas / gas_baseline)
+                gas_score *= (100 - (hum_weighting * 100))
+            else:
+                gas_score = 100 - (hum_weighting * 100)
+
+            # Calculate air_quality_score.
+            return hum_score + gas_score
+
+        return 0
+
+    def get_gas_baseline(self):
+        """ Calculate Gas baseline """
+        start_time = time.time()
+        curr_time = time.time()
+        burn_in_time = (5 * 60)
+
+        burn_in_data = []
+
+        try:
+            # Collect gas resistance burn-in values, then use the average
+            # of the last 50 values to set the upper limit for calculating
+            # gas_baseline.
+            self.logger.debug(
+                'BME680: Collecting gas resistance burn-in data for 5 mins')
+            while curr_time - start_time < burn_in_time:
+                left_time = int(burn_in_time - (curr_time - start_time))
+                curr_time = time.time()
+                if self.sensor.get_sensor_data(
+                ) and self.sensor.data.heat_stable:
+                    gas = self.sensor.data.gas_resistance
+                    burn_in_data.append(gas)
+                    self.logger.debug('BME680: Gas {0}: {1} Ohms'.format(
+                        left_time, round(gas, 1)))
+                    time.sleep(2)
+
+            gas_baseline = sum(burn_in_data[-50:]) / 50.0
+        except KeyboardInterrupt:
+            pass
+        return gas_baseline
+
+    def config(self, temp_offset):
+        """ Function to set confis for BOSCH BME680
+            These oversampling settings can be tweaked to
+            change the balance between accuracy and noise in
+            the data """
+        # pylint: disable=R0201
+        self.sensor.set_humidity_oversample(bme680.OS_2X)
+        self.sensor.set_pressure_oversample(bme680.OS_4X)
+        self.sensor.set_temperature_oversample(bme680.OS_8X)
+        self.sensor.set_filter(bme680.FILTER_SIZE_3)
+        self.sensor.set_gas_status(bme680.ENABLE_GAS_MEAS)
+        self.sensor.set_temp_offset(temp_offset)
+
+        #    self.logger.debug('\n\nInitial reading:')
+        #    for name in dir(sensor.data):
+        #      value = getattr(sensor.data, name)
+        #
+        #      if not name.startswith('_'):
+        #          self.logger.debug('{}: {}'.format(name, value))
+
+        self.sensor.set_gas_heater_temperature(320)
+        self.sensor.set_gas_heater_duration(150)
+        self.sensor.select_gas_heater_profile(0)
+
+    #    self.logger.debug('Calibration data:')
+    #    for name in dir(sensor.calibration_data):
+    #
+    #        if not name.startswith('_'):
+    #            value = getattr(sensor.calibration_data, name)
+    #
+    #            if isinstance(value, int):
+    #                self.logger.debug('{}: {}'.format(name, value))
+
+    def step(self):
+        """ Main loop step for Bosch BME680 sensor """
+        # pylint: disable=W0612,W0613
+
+        # Set the humidity baseline to 40%, an optimal indoor humidity.
+        hum_baseline = 40.0
+
+        if self.sensor is None:
+            return False
+
+        if self.sensor.get_sensor_data():
+            temperature = self.measure_hash(
+                self.id, round(self.sensor.data.temperature, 2), "temperature")
+            pressure = self.measure_hash(self.id,
+                                         int(self.sensor.data.pressure),
+                                         "pressure")
+            humidity = self.measure_hash(self.id,
+                                         int(self.sensor.data.humidity),
+                                         "humidity")
+            gas = self.measure_hash(self.id,
+                                    round(self.sensor.data.gas_resistance, 2),
+                                    "gas")
+
+            air_quality_scr = self.air_quality_score(self.sensor,
+                                                     self.gas_baseline,
+                                                     hum_baseline)
+            air_quality = self.measure_hash(self.id, round(air_quality_scr, 2),
+                                            "quality")
+
+            self.logger.debug(
+                'BME680: Temperature: {0:.2f}C, Pressure: {1:.2f} HPa'.format(
+                    self.sensor.data.temperature, self.sensor.data.pressure))
+            self.logger.debug(
+                'BME680: Humidity {2:.2f} %RH, Resistance: {0:.2f} Ohm Quality Indx {1:.2f}'
+                .format(self.sensor.data.humidity,
+                        self.sensor.data.gas_resistance, air_quality_scr))
+
+            (rtn_value,
+             mid) = self.mqttc.publish(self.mqtt_topic + "temperature",
+                                       temperature,
+                                       qos=0)
+
+            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "pressure",
+                                                  pressure,
+                                                  qos=0)
+
+            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "humidity",
+                                                  humidity,
+                                                  qos=0)
+
+            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "gas",
+                                                  gas,
+                                                  qos=0)
+
+            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "quality",
+                                                  air_quality,
+                                                  qos=0)
+
+        return True
+
+
+class SGP30Sensor(BaseSensor):
+    """ BME680 sensor class """
+    def __init__(self, logger, mqttc, id):
+        super().__init__(logger, mqttc, id)
+        self.bus = self.get_smbus()
+        self.sensor = self.set_baseline(self.bus)
+
+    def get_smbus(self):
+        """ Mainly needed by SGP30 to operate in SMBus (I2C) """
+        # pylint: disable=R0201
+        return SMBus(bus=1, force=0)
+
+    def set_baseline(self, bus, file="/tmp/mySGP30_baseline"):
+        """ Baseline initialization """
+        # pylint: disable=R0201
+
+        sgp = Sgp30(bus, baseline_filename=file)
+        # self.logger.debug("resetting all i2c devices")
+
+        sgp.i2c_geral_call()
+
+        # self.logger.debug(sgp.read_features())
+        # self.logger.debug(sgp.read_serial())
+        sgp.init_sgp()
+
+        return sgp
+
+    def step(self):
+        """ Main loop step for SGP30 sensor """
+        # pylint: disable=W0612,W0613
+
+        if self.sensor is None:
+            return False
+
+        sgp_measurements = self.sensor.read_measurements()
+
+        co2 = self.measure_hash(self.id, int(sgp_measurements.data[0]), "co2")
+        tvoc = self.measure_hash(self.id, int(sgp_measurements.data[1]), "voc")
+
+        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "co2",
+                                              co2,
+                                              qos=0)
+        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "tvoc",
+                                              tvoc,
+                                              qos=0)
+
+        sys.stdout.write(str(datetime.datetime.now()))
+        self.logger.debug("SGP30: eCO2: " + str(sgp_measurements.data[0]) +
+                          " tVOC: " + str(sgp_measurements.data[1]))
+
+        return True
+
+
 class Voccer:
     """Voccer class"""
-    def __init__(self, logger, mqtt_server, mqtt_port):
+    def __init__(self, logger, mqttc, mqtt_server, mqtt_port):
         self.logger = logger
-        self.sensor = {}
-        self.sensor['sgp30'] = {}
-        self.sensor['sgp30']['bus'] = None
-        self.sensor['sgp30']['sensor'] = None
-        self.sensor['bme680'] = {}
-        self.sensor['bme680']['first'] = {}
-        self.sensor['bme680']['first']['sensor'] = None
-        self.sensor['bme680']['first']['baseline'] = 0
-        self.sensor['bme680']['second'] = {}
-        self.sensor['bme680']['second']['sensor'] = None
-        self.sensor['bme680']['second']['baseline'] = 0
 
-        self.mqttc = mqtt.Client()
+        self.mqttc = mqttc
         self.mqtt_server = mqtt_server
         self.mqtt_port = mqtt_port
 
@@ -56,7 +314,7 @@ class Voccer:
         except ConnectionRefusedError:
             print("Can't connect to " + mqtt_server + ":" + str(mqtt_port))
 
-        self.mqtt_topic = "/sensor/voccer/2.0/"
+        self.sensor_array = []
 
     def on_connect(self, client, userdata, flags, rc):
         """Paho Connection callback."""
@@ -100,281 +358,17 @@ class Voccer:
         # pylint: disable=W0612,W0613
         self.logger.debug("Log: " + string)
 
-    def measure_hash(self, sensor_id, measure_value, measure_type):
-        """Create measurement JSON"""
-        # pylint: disable=R0201
-        typeid = 100
-        unitid = 100
-        if measure_type == "voc":
-            typeid = 105
-            unitid = 105
-        elif measure_type == "temperature":
-            typeid = 100
-            unitid = 100
-        elif measure_type == "humidity":
-            typeid = 101
-            unitid = 101
-        elif measure_type == "pressure":
-            typeid = 102
-            unitid = 102
-        elif measure_type == "quality":
-            typeid = 103
-            unitid = 103
-        elif measure_type == "gas":
-            typeid = 104
-            unitid = 104
-        elif measure_type == "co2":
-            typeid = 106
-            unitid = 106
+    def addSensor(self, sensor):
+        """ Add sensor to sensor array """
+        self.sensor_array.append(sensor)
 
-        return json.dumps({
-            'timestamp': round(time.time(), 2),
-            'id': int(sensor_id),
-            'value': measure_value,
-            'type': measure_type,
-            'typeid': typeid,
-            'unitid': unitid
-        })
-
-    def air_quality_score(self, sensor, gas_baseline, hum_baseline):
-        """Calculate air quality score from BME680 or else"""
-        # pylint: disable=R0201
-        # This sets the balance between humidity and gas reading in the
-        # calculation of air_quality_score (25:75, humidity:gas)
-        hum_weighting = 0.25
-
-        sensor.get_sensor_data()
-
-        if sensor.get_sensor_data() and sensor.data.heat_stable:
-            gas = sensor.data.gas_resistance
-            gas_offset = gas_baseline - gas
-            hum = sensor.data.humidity
-            hum_offset = hum - hum_baseline
-
-            # Calculate hum_score as the distance from the hum_baseline.
-            if hum_offset > 0:
-                hum_score = (100 - hum_baseline - hum_offset)
-                hum_score /= (100 - hum_baseline)
-                hum_score *= (hum_weighting * 100)
-            else:
-                hum_score = (hum_baseline + hum_offset)
-                hum_score /= hum_baseline
-                hum_score *= (hum_weighting * 100)
-
-            # Calculate gas_score as the distance from the gas_baseline.
-            if gas_offset > 0:
-                gas_score = (gas / gas_baseline)
-                gas_score *= (100 - (hum_weighting * 100))
-            else:
-                gas_score = 100 - (hum_weighting * 100)
-
-            # Calculate air_quality_score.
-            return hum_score + gas_score
-
-        return 0
-
-    def get_bme680_air_baseline(self, sensor):
-        """ Calculate Gas baseline """
-        start_time = time.time()
-        curr_time = time.time()
-        burn_in_time = 5 * 60
-
-        burn_in_data = []
-
-        try:
-            # Collect gas resistance burn-in values, then use the average
-            # of the last 50 values to set the upper limit for calculating
-            # gas_baseline.
-            self.logger.debug(
-                'BME680: Collecting gas resistance burn-in data for 5 mins')
-            while curr_time - start_time < burn_in_time:
-                left_time = int(burn_in_time - (curr_time - start_time))
-                curr_time = time.time()
-                if sensor.get_sensor_data() and sensor.data.heat_stable:
-                    gas = sensor.data.gas_resistance
-                    burn_in_data.append(gas)
-                    self.logger.debug('BME680: Gas {0}: {1} Ohms'.format(
-                        left_time, round(gas, 1)))
-                    time.sleep(2)
-
-            gas_baseline = sum(burn_in_data[-50:]) / 50.0
-        except KeyboardInterrupt:
-            pass
-        return gas_baseline
-
-    def set_bme680_config(self, sensor, temp_offset):
-        """ Function to set confis for BOSCH BME680
-            These oversampling settings can be tweaked to
-            change the balance between accuracy and noise in
-            the data """
-        # pylint: disable=R0201
-        sensor.set_humidity_oversample(bme680.OS_2X)
-        sensor.set_pressure_oversample(bme680.OS_4X)
-        sensor.set_temperature_oversample(bme680.OS_8X)
-        sensor.set_filter(bme680.FILTER_SIZE_3)
-        sensor.set_gas_status(bme680.ENABLE_GAS_MEAS)
-        sensor.set_temp_offset(temp_offset)
-
-        #    self.logger.debug('\n\nInitial reading:')
-        #    for name in dir(sensor.data):
-        #      value = getattr(sensor.data, name)
-        #
-        #      if not name.startswith('_'):
-        #          self.logger.debug('{}: {}'.format(name, value))
-
-        sensor.set_gas_heater_temperature(320)
-        sensor.set_gas_heater_duration(150)
-        sensor.select_gas_heater_profile(0)
-
-    #    self.logger.debug('Calibration data:')
-    #    for name in dir(sensor.calibration_data):
-    #
-    #        if not name.startswith('_'):
-    #            value = getattr(sensor.calibration_data, name)
-    #
-    #            if isinstance(value, int):
-    #                self.logger.debug('{}: {}'.format(name, value))
-
-    def init_bme680(self, addr, name, temp_offset):
-        """ init Bosch BME680 sensor """
-        try:
-            self.sensor['bme680'][name]['sensor'] = bme680.BME680(addr)
-            self.set_bme680_config(self.sensor['bme680'][name]['sensor'],
-                                   temp_offset)
-            self.sensor['bme680'][name][
-                'baseline'] = self.get_bme680_air_baseline(
-                    self.sensor['bme680'][name]['sensor'])
-        except IOError as execption_str:
-            print("Can't open BME680 at I2C addr: " + str(hex(addr)) + " (" +
-                  str(execption_str) + ")")
-            return False
-
-        return True
-
-    def bme680_step(self, sensor, sensor_id, gas_baseline):
-        """ Main loop step for Bosch BME680 sensor """
-        # pylint: disable=W0612,W0613
-
-        # Set the humidity baseline to 40%, an optimal indoor humidity.
-        hum_baseline = 40.0
-
-        if sensor is None:
-            return False
-
-        if sensor.get_sensor_data():
-            temperature = self.measure_hash(sensor_id,
-                                            round(sensor.data.temperature, 2),
-                                            "temperature")
-            pressure = self.measure_hash(sensor_id, int(sensor.data.pressure),
-                                         "pressure")
-            humidity = self.measure_hash(sensor_id, int(sensor.data.humidity),
-                                         "humidity")
-            gas = self.measure_hash(sensor_id,
-                                    round(sensor.data.gas_resistance, 2),
-                                    "gas")
-
-            air_quality_scr = self.air_quality_score(sensor, gas_baseline,
-                                                     hum_baseline)
-            air_quality = self.measure_hash(sensor_id,
-                                            round(air_quality_scr,
-                                                  2), "quality")
-
-            self.logger.debug(
-                'BME680: Temperature: {0:.2f}C, Pressure: {1:.2f} HPa'.format(
-                    sensor.data.temperature, sensor.data.pressure))
-            self.logger.debug(
-                'BME680: Humidity {2:.2f} %RH, Resistance: {0:.2f} Ohm Quality Indx {1:.2f}'
-                .format(sensor.data.humidity, sensor.data.gas_resistance,
-                        air_quality_scr))
-
-            (rtn_value,
-             mid) = self.mqttc.publish(self.mqtt_topic + "temperature",
-                                       temperature,
-                                       qos=0)
-
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "pressure",
-                                                  pressure,
-                                                  qos=0)
-
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "humidity",
-                                                  humidity,
-                                                  qos=0)
-
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "gas",
-                                                  gas,
-                                                  qos=0)
-
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "quality",
-                                                  air_quality,
-                                                  qos=0)
-
-        return True
-
-    def get_smbus(self):
-        """ Mainly needed by SGP30 to operate in SMBus (I2C) """
-        # pylint: disable=R0201
-        return SMBus(bus=1, force=0)
-
-    def set_sgp30_baseline(self, bus, file="/tmp/mySGP30_baseline"):
-        """ Baseline initialization """
-        # pylint: disable=R0201
-
-        sgp = Sgp30(bus, baseline_filename=file)
-        # self.logger.debug("resetting all i2c devices")
-
-        sgp.i2c_geral_call()
-
-        # self.logger.debug(sgp.read_features())
-        # self.logger.debug(sgp.read_serial())
-        sgp.init_sgp()
-
-        return sgp
-
-    def init_sgp30(self):
-        """ Init SGP30 sensor """
-        self.sensor['sgp30']['bus'] = self.get_smbus()
-        self.sensor['sgp30']['sensor'] = self.set_sgp30_baseline(
-            self.sensor['sgp30']['bus'])
-
-    def sgp30_step(self, sensor, sensor_id):
-        """ Main loop step for SGP30 sensor """
-        # pylint: disable=W0612,W0613
-
-        if sensor is None:
-            return False
-
-        sgp_measurements = sensor.read_measurements()
-
-        co2 = self.measure_hash(sensor_id, int(sgp_measurements.data[0]),
-                                "co2")
-        tvoc = self.measure_hash(sensor_id, int(sgp_measurements.data[1]),
-                                 "voc")
-
-        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "co2",
-                                              co2,
-                                              qos=0)
-        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "tvoc",
-                                              tvoc,
-                                              qos=0)
-
-        sys.stdout.write(str(datetime.datetime.now()))
-        self.logger.debug("SGP30: eCO2: " + str(sgp_measurements.data[0]) +
-                          " tVOC: " + str(sgp_measurements.data[1]))
-
-        return True
-
-    def mainloop(self, sensor_id):
+    def mainloop(self):
         """ Main loop to sensors """
         # pylint: disable=W0612,W0613
 
         while True:
-            self.bme680_step(self.sensor['bme680']['first']['sensor'],
-                             sensor_id,
-                             self.sensor['bme680']['first']['baseline'])
-            self.bme680_step(self.sensor['bme680']['second']['sensor'],
-                             (sensor_id + 1),
-                             self.sensor['bme680']['second']['baseline'])
-            self.sgp30_step(self.sensor['sgp30']['sensor'], (sensor_id + 2))
+            for sensor in self.sensor_array:
+                sensor.step()
             time.sleep(10 * 60)
 
 
@@ -440,20 +434,27 @@ def main(argv):
             debug_handler.setLevel(logging.DEBUG)
 
     logger.addHandler(debug_handler)
-    voccer_class = Voccer(logger, mqtt_server, mqtt_port)
+    mqttc = mqtt.Client()
+    voccer_class = Voccer(logger, mqttc, mqtt_server, mqtt_port)
 
     if sensors['sgp30'] is True:
-        voccer_class.init_sgp30()
+        voccer_class.addSensor(SGP30Sensor(logger, mqttc, sensor_id))
+        sensor_id += 1
 
     if sensors['bme680_first'] is True:
-        voccer_class.init_bme680(bme680.I2C_ADDR_PRIMARY, "first", temp_offset)
+        voccer_class.addSensor(
+            BME680Sensor(logger, mqttc, sensor_id, bme680.I2C_ADDR_PRIMARY,
+                         temp_offset))
+        sensor_id += 1
 
     if sensors['bme680_second'] is True:
-        voccer_class.init_bme680(bme680.I2C_ADDR_SECONDARY, "second",
-                                 temp_offset)
+        voccer_class.addSensor(
+            BME680Sensor(logger, mqttc, sensor_id, bme680.I2C_ADDR_SECONDARY,
+                         temp_offset))
+        sensor_id += 1
 
     try:
-        voccer_class.mainloop(sensor_id)
+        voccer_class.mainloop()
     except KeyboardInterrupt:
         pass
 
