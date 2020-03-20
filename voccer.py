@@ -13,9 +13,12 @@ import logging
 import sys
 import getopt
 import paho.mqtt.client as mqtt
+import threading
+import RPi.GPIO as GPIO
 import bme680
 from smbus2 import SMBus
 from sgp30 import Sgp30
+from pms5003 import PMS5003
 
 
 class BaseSensor:
@@ -52,6 +55,21 @@ class BaseSensor:
         elif measure_type == "co2":
             typeid = 106
             unitid = 106
+        elif measure_type == "PM1":
+            typeid = 107
+            unitid = 107
+        elif measure_type == "PM2.5":
+            typeid = 108
+            unitid = 108
+        elif measure_type == "PM10":
+            typeid = 109
+            unitid = 109
+        elif measure_type == "atmospheric_PM1":
+            typeid = 110
+            unitid = 107
+        elif measure_type == "atmospheric_PM2.5":
+            typeid = 111
+            unitid = 108
 
         return json.dumps({
             'timestamp': round(time.time(), 2),
@@ -61,6 +79,105 @@ class BaseSensor:
             'typeid': typeid,
             'unitid': unitid
         })
+
+    def enable_sensor(self):
+        """Empty enable if we don't need it"""
+
+    def disable_sensor(self):
+        """Empty disalbe if we don't need it"""
+
+    def step(self):
+        """Empty step just for to be sure"""
+
+
+class PMS5003Sensor(BaseSensor):
+    """ BME680 sensor class """
+    def __init__(self, logger, mqttc, id, serialdevice):
+        super().__init__(logger, mqttc, id)
+
+        # Configure the PMS5003 for Enviro+
+        self.pms5003 = PMS5003(device=serialdevice,
+                               baudrate=9600,
+                               pin_enable=22,
+                               pin_reset=27)
+
+        self.stopafter = 3 * 60
+        self.enable = True
+        self.data = None
+        try:
+            threading.Thread(target=self._read_thread,
+                             args=(
+                                 self.pms5003,
+                                 1,
+                             )).start()
+        except:
+            print(
+                "PMS5003: Can't start reading thread. You can't get anything out of this"
+            )
+
+    """ Read because PMS5003 is serial outputting device """
+
+    def _read_thread(self, pms5003, delay):
+        while True:
+            if self.enable is True:
+                self.oldtime = time.time()
+                self.stopafter = 3 * 60
+                self.enable = False
+                try:
+                    while (time.time() - self.oldtime) < self.stopafter:
+                        self.data = pms5003.read()
+                except:
+                    self.enable = False
+            time.sleep(1)
+
+    def enable_sensor(self):
+        with threading.Lock():
+            self.enable = True
+            self.pms5003.setup()
+
+    def disable_sensor(self):
+        with threading.Lock():
+            self.enable = False
+            GPIO.setwarnings(False)
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self.pms5003._pin_enable, GPIO.OUT, initial=GPIO.LOW)
+
+    def step(self):
+        with threading.Lock():
+            if self.data is not None:
+                airatmospheric_environment_1_0 = self.measure_hash(
+                    self.id, self.data.pm_ug_per_m3(1.0, True),
+                    "atmospheric_PM1.0")
+                airatmospheric_environment_2_5 = self.measure_hash(
+                    self.id, self.data.pm_ug_per_m3(2.5, True),
+                    "atmospheric_PM2.5")
+                environment_1_0 = self.measure_hash(
+                    self.id, self.data.pm_ug_per_m3(1.0, False), "PM1")
+                environment_2_5 = self.measure_hash(
+                    self.id, self.data.pm_ug_per_m3(2.5, False), "PM2.5")
+                environment_10 = self.measure_hash(
+                    self.id, self.data.pm_ug_per_m3(10, False), "PM10")
+
+                (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "PM1",
+                                                      environment_1_0,
+                                                      qos=0)
+                (rtn_value,
+                 mid) = self.mqttc.publish(self.mqtt_topic + "PM2.5",
+                                           environment_2_5,
+                                           qos=0)
+
+                (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "PM10",
+                                                      environment_10,
+                                                      qos=0)
+
+                (rtn_value, mid) = self.mqttc.publish(
+                    self.mqtt_topic + "airatmospheric_environment_PM1",
+                    airatmospheric_environment_1_0,
+                    qos=0)
+                (rtn_value, mid) = self.mqttc.publish(
+                    self.mqtt_topic + "airatmospheric_environment_PM2.5",
+                    airatmospheric_environment_2_5,
+                    qos=0)
 
 
 class BME680Sensor(BaseSensor):
@@ -367,9 +484,20 @@ class Voccer:
         # pylint: disable=W0612,W0613
 
         while True:
+            # First gather things
             for sensor in self.sensor_array:
                 sensor.step()
-            time.sleep(10 * 60)
+            # Sleep for while before disable
+            time.sleep(30)
+            for sensor in self.sensor_array:
+                sensor.disable_sensor()
+            # Sleep until give sensors couple minutes to settle down
+            # and enable them
+            time.sleep(7.5 * 60)
+            for sensor in self.sensor_array:
+                sensor.enable_sensor()
+            # Then wait for while that they are good and gather data
+            time.sleep(2 * 60)
 
 
 def main(argv):
@@ -380,6 +508,7 @@ def main(argv):
     mqtt_port = 1883
     sensors = {}
     sensors['sgp30'] = False
+    sensors['pms5003'] = False
     sensors['bme680_first'] = False
     sensors['bme680_second'] = False
     temp_offset = 0
@@ -391,9 +520,9 @@ def main(argv):
     debug_handler.setFormatter(formatter)
 
     try:
-        opts, args = getopt.getopt(argv, "hs:bfm:p:gt:v", [
+        opts, args = getopt.getopt(argv, "hs:bfm:p:gt:wv", [
             "help", "sensorid=", "bme680", "bme680second", "mqttserver",
-            "mqttport", "sgp30", "tempoffset", "verbose"
+            "mqttport", "sgp30", "tempoffset", "pms5003", "verbose"
         ])
     except getopt.GetoptError:
         print('voccer.py (without parameters there should')
@@ -405,6 +534,7 @@ def main(argv):
             '  --bme680second (-f) If there is second BME680 available in 0x77'
         )
         print('  --sgp30 (-g) Use Sensirion SGP30')
+        print('  --pms5003 (-w) Use Plantower PMS5003')
         print('  --tempoffset (-t) How much is temperature offset (+/-)')
         print('  --mqttserver (-m) MQTT server location (default: localhost)')
         print('  --mqttport (-p) MQTT server port (default: 1883)')
@@ -423,6 +553,8 @@ def main(argv):
             sensors['bme680_second'] = True
         elif opt in ("-g", "--sgp30"):
             sensors['sgp30'] = True
+        elif opt in ("-w", "--pms5003"):
+            sensors['pms5003'] = True
         elif opt in ("-m", "--mqttserver"):
             mqtt_server = arg
         elif opt in ("-p", "--mqttport"):
@@ -436,6 +568,11 @@ def main(argv):
     logger.addHandler(debug_handler)
     mqttc = mqtt.Client()
     voccer_class = Voccer(logger, mqttc, mqtt_server, mqtt_port)
+
+    if sensors['pms5003'] is True:
+        voccer_class.addSensor(
+            PMS5003Sensor(logger, mqttc, sensor_id, '/dev/ttyS0'))
+        sensor_id += 1
 
     if sensors['sgp30'] is True:
         voccer_class.addSensor(SGP30Sensor(logger, mqttc, sensor_id))
