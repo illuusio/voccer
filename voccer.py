@@ -429,7 +429,9 @@ class Voccer:
         try:
             self.mqttc.connect(mqtt_server, mqtt_port, 60)
         except ConnectionRefusedError:
-            print("Can't connect to " + mqtt_server + ":" + str(mqtt_port))
+            print("Can't connect to MQTT server " + mqtt_server + ":" + str(mqtt_port))
+        except ValueError:
+            print("Host is invalid and can connect to MQTT server " + mqtt_server + ":" + str(mqtt_port))
 
         self.sensor_array = []
 
@@ -521,8 +523,8 @@ def main(argv):
 
     try:
         opts, args = getopt.getopt(argv, "hs:bfm:p:gt:wv", [
-            "help", "sensorid=", "bme680", "bme680second", "mqttserver",
-            "mqttport", "sgp30", "tempoffset", "pms5003", "verbose"
+            "help", "sensorid=", "bme680", "bme680second", "mqttserver=",
+            "mqttport=", "sgp30", "tempoffset=", "pms5003", "verbose"
         ])
     except getopt.GetoptError:
         print('voccer.py (without parameters there should')
