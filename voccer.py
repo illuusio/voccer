@@ -147,7 +147,7 @@ class PMS5003Sensor(BaseSensor):
             if self.data is not None:
                 airatmospheric_environment_1_0 = self.measure_hash(
                     self.sensor_id, self.data.pm_ug_per_m3(1.0, True),
-                    "atmospheric_PM1.0")
+                    "atmospheric_PM1")
                 airatmospheric_environment_2_5 = self.measure_hash(
                     self.sensor_id, self.data.pm_ug_per_m3(2.5, True),
                     "atmospheric_PM2.5")
@@ -232,7 +232,7 @@ class BME680Sensor(BaseSensor):
         start_time = time.time()
         curr_time = time.time()
         # burn_in_time = (5 * 60)
-        burn_in_time = (1 * 60)
+        burn_in_time = (20)
 
         burn_in_data = []
 
@@ -264,10 +264,13 @@ class BME680Sensor(BaseSensor):
             change the balance between accuracy and noise in
             the data """
         # pylint: disable=R0201
-        self.sensor.set_humidity_oversample(bme680.OS_2X)
-        self.sensor.set_pressure_oversample(bme680.OS_4X)
+        # We don't need that speedy readings and we want
+        # Nice and steady correct answers
+        self.sensor.set_humidity_oversample(bme680.OS_8X)
+        self.sensor.set_pressure_oversample(bme680.OS_8X)
         self.sensor.set_temperature_oversample(bme680.OS_8X)
-        self.sensor.set_filter(bme680.FILTER_SIZE_3)
+        # Stedier and more correct values
+        self.sensor.set_filter(bme680.FILTER_SIZE_7)
         self.sensor.set_gas_status(bme680.ENABLE_GAS_MEAS)
         self.sensor.set_temp_offset(temp_offset)
 
