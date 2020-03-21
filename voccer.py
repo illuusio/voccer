@@ -231,7 +231,8 @@ class BME680Sensor(BaseSensor):
         """ Calculate Gas baseline """
         start_time = time.time()
         curr_time = time.time()
-        burn_in_time = (5 * 60)
+        # burn_in_time = (5 * 60)
+        burn_in_time = (1 * 60)
 
         burn_in_data = []
 
@@ -250,7 +251,7 @@ class BME680Sensor(BaseSensor):
                     burn_in_data.append(gas)
                     self.logger.debug('BME680: Gas {0}: {1} Ohms'.format(
                         left_time, round(gas, 1)))
-                    time.sleep(2)
+                    time.sleep(10)
 
             gas_baseline = sum(burn_in_data[-50:]) / 50.0
         except KeyboardInterrupt:
@@ -323,7 +324,7 @@ class BME680Sensor(BaseSensor):
                 'BME680: Temperature: {0:.2f}C, Pressure: {1:.2f} HPa'.format(
                     self.sensor.data.temperature, self.sensor.data.pressure))
             self.logger.debug(
-                'BME680: Humidity {2:.2f} %RH, Resistance: {0:.2f} Ohm Quality Indx {1:.2f}'
+                'BME680: Humidity {0:.2f} %RH, Resistance: {1:.2f} Ohm Quality Indx {2:.2f}'
                 .format(self.sensor.data.humidity,
                         self.sensor.data.gas_resistance, air_quality_scr))
 
