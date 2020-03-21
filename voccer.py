@@ -12,8 +12,8 @@ import time
 import logging
 import sys
 import getopt
-import paho.mqtt.client as mqtt
 import threading
+import paho.mqtt.client as mqtt
 import RPi.GPIO as GPIO
 import bme680
 from smbus2 import SMBus
@@ -23,10 +23,10 @@ from pms5003 import PMS5003
 
 class BaseSensor:
     """ Base sensor class """
-    def __init__(self, logger, mqttc, id):
+    def __init__(self, logger, mqttc, sensor_id):
         self.logger = logger
         self.mqttc = mqttc
-        self.id = id
+        self.sensor_id = sensor_id
         self.mqtt_topic = "/sensor/voccer/2.0/"
 
     def measure_hash(self, sensor_id, measure_value, measure_type):
@@ -92,8 +92,8 @@ class BaseSensor:
 
 class PMS5003Sensor(BaseSensor):
     """ BME680 sensor class """
-    def __init__(self, logger, mqttc, id, serialdevice):
-        super().__init__(logger, mqttc, id)
+    def __init__(self, logger, mqttc, sensor_id, serialdevice):
+        super().__init__(logger, mqttc, sensor_id)
 
         # Configure the PMS5003 for Enviro+
         self.pms5003 = PMS5003(device=serialdevice,
@@ -104,20 +104,20 @@ class PMS5003Sensor(BaseSensor):
         self.stopafter = 3 * 60
         self.enable = True
         self.data = None
+        self.oldtime = None
         try:
             threading.Thread(target=self._read_thread,
                              args=(
                                  self.pms5003,
-                                 1,
                              )).start()
         except:
             print(
                 "PMS5003: Can't start reading thread. You can't get anything out of this"
             )
 
-    """ Read because PMS5003 is serial outputting device """
 
-    def _read_thread(self, pms5003, delay):
+    def _read_thread(self, pms5003):
+        """ Read because PMS5003 is serial outputting device """
         while True:
             if self.enable is True:
                 self.oldtime = time.time()
@@ -146,17 +146,17 @@ class PMS5003Sensor(BaseSensor):
         with threading.Lock():
             if self.data is not None:
                 airatmospheric_environment_1_0 = self.measure_hash(
-                    self.id, self.data.pm_ug_per_m3(1.0, True),
+                    self.sensor_id, self.data.pm_ug_per_m3(1.0, True),
                     "atmospheric_PM1.0")
                 airatmospheric_environment_2_5 = self.measure_hash(
-                    self.id, self.data.pm_ug_per_m3(2.5, True),
+                    self.sensor_id, self.data.pm_ug_per_m3(2.5, True),
                     "atmospheric_PM2.5")
                 environment_1_0 = self.measure_hash(
-                    self.id, self.data.pm_ug_per_m3(1.0, False), "PM1")
+                    self.sensor_id, self.data.pm_ug_per_m3(1.0, False), "PM1")
                 environment_2_5 = self.measure_hash(
-                    self.id, self.data.pm_ug_per_m3(2.5, False), "PM2.5")
+                    self.sensor_id, self.data.pm_ug_per_m3(2.5, False), "PM2.5")
                 environment_10 = self.measure_hash(
-                    self.id, self.data.pm_ug_per_m3(10, False), "PM10")
+                    self.sensor_id, self.data.pm_ug_per_m3(10, False), "PM10")
 
                 (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "PM1",
                                                       environment_1_0,
@@ -182,8 +182,8 @@ class PMS5003Sensor(BaseSensor):
 
 class BME680Sensor(BaseSensor):
     """ BME680 sensor class """
-    def __init__(self, logger, mqttc, id, addr, temp_offset):
-        super().__init__(logger, mqttc, id)
+    def __init__(self, logger, mqttc, sensor_id, addr, temp_offset):
+        super().__init__(logger, mqttc, sensor_id)
         self.addr = addr
         self.temp_offset = temp_offset
         self.sensor = bme680.BME680(addr)
@@ -302,21 +302,21 @@ class BME680Sensor(BaseSensor):
 
         if self.sensor.get_sensor_data():
             temperature = self.measure_hash(
-                self.id, round(self.sensor.data.temperature, 2), "temperature")
-            pressure = self.measure_hash(self.id,
+                self.sensor_id, round(self.sensor.data.temperature, 2), "temperature")
+            pressure = self.measure_hash(self.sensor_id,
                                          int(self.sensor.data.pressure),
                                          "pressure")
-            humidity = self.measure_hash(self.id,
+            humidity = self.measure_hash(self.sensor_id,
                                          int(self.sensor.data.humidity),
                                          "humidity")
-            gas = self.measure_hash(self.id,
+            gas = self.measure_hash(self.sensor_id,
                                     round(self.sensor.data.gas_resistance, 2),
                                     "gas")
 
             air_quality_scr = self.air_quality_score(self.sensor,
                                                      self.gas_baseline,
                                                      hum_baseline)
-            air_quality = self.measure_hash(self.id, round(air_quality_scr, 2),
+            air_quality = self.measure_hash(self.sensor_id, round(air_quality_scr, 2),
                                             "quality")
 
             self.logger.debug(
@@ -353,8 +353,8 @@ class BME680Sensor(BaseSensor):
 
 class SGP30Sensor(BaseSensor):
     """ BME680 sensor class """
-    def __init__(self, logger, mqttc, id):
-        super().__init__(logger, mqttc, id)
+    def __init__(self, logger, mqttc, sensor_id):
+        super().__init__(logger, mqttc, sensor_id)
         self.bus = self.get_smbus()
         self.sensor = self.set_baseline(self.bus)
 
@@ -387,8 +387,8 @@ class SGP30Sensor(BaseSensor):
 
         sgp_measurements = self.sensor.read_measurements()
 
-        co2 = self.measure_hash(self.id, int(sgp_measurements.data[0]), "co2")
-        tvoc = self.measure_hash(self.id, int(sgp_measurements.data[1]), "voc")
+        co2 = self.measure_hash(self.sensor_id, int(sgp_measurements.data[0]), "co2")
+        tvoc = self.measure_hash(self.sensor_id, int(sgp_measurements.data[1]), "voc")
 
         (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "co2",
                                               co2,
@@ -475,7 +475,7 @@ class Voccer:
         # pylint: disable=W0612,W0613
         self.logger.debug("Log: " + string)
 
-    def addSensor(self, sensor):
+    def add_sensor(self, sensor):
         """ Add sensor to sensor array """
         self.sensor_array.append(sensor)
 
@@ -570,22 +570,22 @@ def main(argv):
     voccer_class = Voccer(logger, mqttc, mqtt_server, mqtt_port)
 
     if sensors['pms5003'] is True:
-        voccer_class.addSensor(
+        voccer_class.add_sensor(
             PMS5003Sensor(logger, mqttc, sensor_id, '/dev/ttyS0'))
         sensor_id += 1
 
     if sensors['sgp30'] is True:
-        voccer_class.addSensor(SGP30Sensor(logger, mqttc, sensor_id))
+        voccer_class.add_sensor(SGP30Sensor(logger, mqttc, sensor_id))
         sensor_id += 1
 
     if sensors['bme680_first'] is True:
-        voccer_class.addSensor(
+        voccer_class.add_sensor(
             BME680Sensor(logger, mqttc, sensor_id, bme680.I2C_ADDR_PRIMARY,
                          temp_offset))
         sensor_id += 1
 
     if sensors['bme680_second'] is True:
-        voccer_class.addSensor(
+        voccer_class.add_sensor(
             BME680Sensor(logger, mqttc, sensor_id, bme680.I2C_ADDR_SECONDARY,
                          temp_offset))
         sensor_id += 1
