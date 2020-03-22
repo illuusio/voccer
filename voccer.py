@@ -547,6 +547,9 @@ def main(argv):
         print(
             '                --enable=bme680,bme680,sgp30,pms5003 (Multi stuff only works with bme680 currently)'
         )
+        print(
+            '              if you want to some sensor to have specific if use sensor:id notation like "bme680:1"'
+        )
         print('  --mqttserver (-m) MQTT server location (default: localhost)')
         print('  --mqttport (-p) MQTT server port (default: 1883)')
         print('  --verbose (-v) Enable debug priting')
@@ -554,7 +557,7 @@ def main(argv):
 
     for opt, arg in opts:
         if opt == '-h':
-            print('voccer.py -s sensor_id -e bme680,sgp30,pms5300')
+            print('voccer.py -s sensor_id -e bme680:id,sgp30:id,pms5300:id')
             sys.exit()
         elif opt in ("-s", "--sensorid"):
             sensor_id = int(arg)
@@ -578,6 +581,12 @@ def main(argv):
     for sensor_name in sensors_list:
         sensor = None
         sensor_name_lower = sensor_name.lower()
+
+        if ":" in sensor_name_lower:
+            sensor_split_array = sensor_name_lower.split(':')
+            sensor_id = int(sensor_split_array[1])
+            sensor_name_lower = sensor_split_array[0]
+
         if sensor_name_lower == 'pms5003':
             sensor = PMS5003Sensor(logger, mqttc, sensor_id, '/dev/ttyS0')
 
