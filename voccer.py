@@ -107,14 +107,11 @@ class PMS5003Sensor(BaseSensor):
         self.oldtime = None
         try:
             threading.Thread(target=self._read_thread,
-                             args=(
-                                 self.pms5003,
-                             )).start()
+                             args=(self.pms5003, )).start()
         except:
             print(
                 "PMS5003: Can't start reading thread. You can't get anything out of this"
             )
-
 
     def _read_thread(self, pms5003):
         """ Read because PMS5003 is serial outputting device """
@@ -154,7 +151,8 @@ class PMS5003Sensor(BaseSensor):
                 environment_1_0 = self.measure_hash(
                     self.sensor_id, self.data.pm_ug_per_m3(1.0, False), "PM1")
                 environment_2_5 = self.measure_hash(
-                    self.sensor_id, self.data.pm_ug_per_m3(2.5, False), "PM2.5")
+                    self.sensor_id, self.data.pm_ug_per_m3(2.5, False),
+                    "PM2.5")
                 environment_10 = self.measure_hash(
                     self.sensor_id, self.data.pm_ug_per_m3(10, False), "PM10")
 
@@ -306,7 +304,8 @@ class BME680Sensor(BaseSensor):
 
         if self.sensor.get_sensor_data():
             temperature = self.measure_hash(
-                self.sensor_id, round(self.sensor.data.temperature, 2), "temperature")
+                self.sensor_id, round(self.sensor.data.temperature, 2),
+                "temperature")
             pressure = self.measure_hash(self.sensor_id,
                                          int(self.sensor.data.pressure),
                                          "pressure")
@@ -320,7 +319,8 @@ class BME680Sensor(BaseSensor):
             air_quality_scr = self.air_quality_score(self.sensor,
                                                      self.gas_baseline,
                                                      hum_baseline)
-            air_quality = self.measure_hash(self.sensor_id, round(air_quality_scr, 2),
+            air_quality = self.measure_hash(self.sensor_id,
+                                            round(air_quality_scr, 2),
                                             "quality")
 
             self.logger.debug(
@@ -391,8 +391,10 @@ class SGP30Sensor(BaseSensor):
 
         sgp_measurements = self.sensor.read_measurements()
 
-        co2 = self.measure_hash(self.sensor_id, int(sgp_measurements.data[0]), "co2")
-        tvoc = self.measure_hash(self.sensor_id, int(sgp_measurements.data[1]), "voc")
+        co2 = self.measure_hash(self.sensor_id, int(sgp_measurements.data[0]),
+                                "co2")
+        tvoc = self.measure_hash(self.sensor_id, int(sgp_measurements.data[1]),
+                                 "voc")
 
         (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "co2",
                                               co2,
@@ -433,9 +435,11 @@ class Voccer:
         try:
             self.mqttc.connect(mqtt_server, mqtt_port, 60)
         except ConnectionRefusedError:
-            print("Can't connect to MQTT server " + mqtt_server + ":" + str(mqtt_port))
+            print("Can't connect to MQTT server " + mqtt_server + ":" +
+                  str(mqtt_port))
         except ValueError:
-            print("Host is invalid and can connect to MQTT server " + mqtt_server + ":" + str(mqtt_port))
+            print("Host is invalid and can connect to MQTT server " +
+                  mqtt_server + ":" + str(mqtt_port))
 
         self.sensor_array = []
 
@@ -517,6 +521,7 @@ def main(argv):
     sensors['pms5003'] = False
     sensors['bme680_first'] = False
     sensors['bme680_second'] = False
+    sensors_list = []
     temp_offset = 0
 
     logger = logging.getLogger()
@@ -526,22 +531,22 @@ def main(argv):
     debug_handler.setFormatter(formatter)
 
     try:
-        opts, args = getopt.getopt(argv, "hs:bfm:p:gt:wv", [
-            "help", "sensorid=", "bme680", "bme680second", "mqttserver=",
-            "mqttport=", "sgp30", "tempoffset=", "pms5003", "verbose"
+        opts, args = getopt.getopt(argv, "hs:m:p:t:e:v", [
+            "help", "sensorid=", "mqttserver=", "mqttport=", "tempoffset=",
+            "enable=", "verbose"
         ])
     except getopt.GetoptError:
         print('voccer.py (without parameters there should')
         print('be Bosch BME680 available in I2C addr 0x76)')
         print('Parameters:')
         print('  --sensorid (-s) Sensor id')
-        print('  --bme680 (-b) Use BME680 sensor')
-        print(
-            '  --bme680second (-f) If there is second BME680 available in 0x77'
-        )
-        print('  --sgp30 (-g) Use Sensirion SGP30')
-        print('  --pms5003 (-w) Use Plantower PMS5003')
         print('  --tempoffset (-t) How much is temperature offset (+/-)')
+        print(
+            '  --enable (-t) Enable sensor. comma separated list for multiple sensors (bme680, sgp30 or pms5003)'
+        )
+        print(
+            '                --enable=bme680,bme680,sgp30,pms5003 (Multi stuff only works with bme680 currently)'
+        )
         print('  --mqttserver (-m) MQTT server location (default: localhost)')
         print('  --mqttport (-p) MQTT server port (default: 1883)')
         print('  --verbose (-v) Enable debug priting')
@@ -549,18 +554,12 @@ def main(argv):
 
     for opt, arg in opts:
         if opt == '-h':
-            print('voccer.py -s sensor_id -f Bosch BME680 secondary addr')
+            print('voccer.py -s sensor_id -e bme680,sgp30,pms5300')
             sys.exit()
         elif opt in ("-s", "--sensorid"):
             sensor_id = int(arg)
-        elif opt in ("-b", "--bme680"):
-            sensors['bme680_first'] = True
-        elif opt in ("-f", "--bme680second"):
-            sensors['bme680_second'] = True
-        elif opt in ("-g", "--sgp30"):
-            sensors['sgp30'] = True
-        elif opt in ("-w", "--pms5003"):
-            sensors['pms5003'] = True
+        elif opt in ("-e", "--enable"):
+            sensors_list = [x.strip() for x in arg.split(',')]
         elif opt in ("-m", "--mqttserver"):
             mqtt_server = arg
         elif opt in ("-p", "--mqttport"):
@@ -574,27 +573,26 @@ def main(argv):
     logger.addHandler(debug_handler)
     mqttc = mqtt.Client()
     voccer_class = Voccer(logger, mqttc, mqtt_server, mqtt_port)
+    bme680_addr = bme680.I2C_ADDR_PRIMARY
 
-    if sensors['pms5003'] is True:
-        voccer_class.add_sensor(
-            PMS5003Sensor(logger, mqttc, sensor_id, '/dev/ttyS0'))
-        sensor_id += 1
+    for sensor_name in sensors_list:
+        sensor = None
+        sensor_name_lower = sensor_name.lower()
+        if sensor_name_lower == 'pms5003':
+            sensor = PMS5003Sensor(logger, mqttc, sensor_id, '/dev/ttyS0')
 
-    if sensors['sgp30'] is True:
-        voccer_class.add_sensor(SGP30Sensor(logger, mqttc, sensor_id))
-        sensor_id += 1
+        if sensor_name_lower == 'sgp30':
+            sensor = SGP30Sensor(logger, mqttc, sensor_id)
 
-    if sensors['bme680_first'] is True:
-        voccer_class.add_sensor(
-            BME680Sensor(logger, mqttc, sensor_id, bme680.I2C_ADDR_PRIMARY,
-                         temp_offset))
-        sensor_id += 1
+        if sensor_name_lower == 'bme680':
+            sensor = BME680Sensor(logger, mqttc, sensor_id, bme680_addr,
+                                  temp_offset)
+            if bme680_addr == bme680.I2C_ADDR_PRIMARY:
+                bme680_addr = bme680.I2C_ADDR_SECONDARY
 
-    if sensors['bme680_second'] is True:
-        voccer_class.add_sensor(
-            BME680Sensor(logger, mqttc, sensor_id, bme680.I2C_ADDR_SECONDARY,
-                         temp_offset))
-        sensor_id += 1
+        if sensor is not None:
+            voccer_class.add_sensor(sensor)
+            sensor_id += 1
 
     try:
         voccer_class.mainloop()
