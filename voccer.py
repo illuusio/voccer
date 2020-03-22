@@ -523,6 +523,7 @@ def main(argv):
     sensors['bme680_second'] = False
     sensors_list = []
     temp_offset = 0
+    temo_offset_array = None
 
     logger = logging.getLogger()
 
@@ -568,7 +569,10 @@ def main(argv):
         elif opt in ("-p", "--mqttport"):
             mqtt_port = int(arg)
         elif opt in ("-t", "--tempoffset"):
-            temp_offset = float(arg)
+            if "," in arg:
+                temp_offset_array = [x.strip() for x in arg.split(',')]
+            else:
+                temp_offset = float(arg)
         elif opt in ("-v", "--verbose"):
             logger.setLevel(logging.DEBUG)
             debug_handler.setLevel(logging.DEBUG)
@@ -577,6 +581,7 @@ def main(argv):
     mqttc = mqtt.Client()
     voccer_class = Voccer(logger, mqttc, mqtt_server, mqtt_port)
     bme680_addr = bme680.I2C_ADDR_PRIMARY
+    bme680_temp = 0
 
     for sensor_name in sensors_list:
         sensor = None
@@ -594,6 +599,11 @@ def main(argv):
             sensor = SGP30Sensor(logger, mqttc, sensor_id)
 
         if sensor_name_lower == 'bme680':
+            if temp_offset_array is not None:
+                temp_offset = float(temp_offset_array[bme680_temp])
+                if len(temp_offset_array) > bme680_temp:
+                    bme680_temp += 1
+
             sensor = BME680Sensor(logger, mqttc, sensor_id, bme680_addr,
                                   temp_offset)
             if bme680_addr == bme680.I2C_ADDR_PRIMARY:
