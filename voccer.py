@@ -54,22 +54,22 @@ class BaseSensor:
             unitid = 104
         elif measure_type == "co2":
             typeid = 106
-            unitid = 106
+            unitid = 105
         elif measure_type == "PM1":
             typeid = 107
             unitid = 107
         elif measure_type == "PM2.5":
             typeid = 108
-            unitid = 108
+            unitid = 107
         elif measure_type == "PM10":
             typeid = 109
-            unitid = 109
+            unitid = 107
         elif measure_type == "atmospheric_PM1":
             typeid = 110
             unitid = 107
         elif measure_type == "atmospheric_PM2.5":
             typeid = 111
-            unitid = 108
+            unitid = 107
 
         return json.dumps({
             'timestamp': round(time.time(), 2),
