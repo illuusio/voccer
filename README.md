@@ -1,6 +1,6 @@
 # Voccer
-Small Python3 based utility to monitor tVOC and eCO2 with Bosch BME680 and SGP30
-to MQTT server
+Small Python3 based utility to send tVOC, eCO2, Particulate Matter with Bosch BME680, Sensirion SGP30 and Plantower PMS5003
+measurements to MQTT server
 
 First of all read this:
 **Please note, this sensor, like all VOC/gas sensors, has variability and to
@@ -13,37 +13,49 @@ Pull Requests to full fill this README.md documentation.
 
 Currently Voccer is work in process and it can change every commit
 
-It's tested with these break-out boards
+It's tested with these break-out boards and sensors
 
  * [Adafruit SGP30 Air Quality Sensor Breakout - VOC and eCO2](https://www.adafruit.com/product/3709)
  * [BME680 Breakout - Air Quality, Temperature, Pressure, Humidity Sensor BME680 Breakout - Air Quality, Temperature, Pressure, Humidity Sensor](https://shop.pimoroni.com/products/bme680-breakout)
+ * [PMS5003 Particulate Matter Sensor Breakout](https://shop.pimoroni.com/products/particulate-matter-sensor-breakout) and [PMS5003 Particulate Matter Sensor with Cable](https://shop.pimoroni.com/products/pms5003-particulate-matter-sensor-with-cable)
 
 As noticed they both I2C based so one has to have skills to make them work
 with Raspberry Pi you need to have module *i2c-dev* loaded before using
 Python libraries. If you can see them in I2C-bus with *i2c-detect* then they
 should work.
 
+Most of the python libraries can be found with Python pip package manager
+
 **As said earlier: it's up to you make sensors work**
 
-## Commanline args
+## Commandline args
  | Arg | what                       | preset    |
  |-----|----------------------------|-----------|
  | -h  | Help                       |           |
  | -s  | Sensor ID                  | 1         |
- | -f  | Use second addr for BME680 | NO        |
  | -t  | Temp offset for BME680     | 0         |
- | -g  | Use SGP30                  | NO        |
+ | -e  | Enable sensor              | Nothing   |
  | -m  | MQTT server address        | localhost |
  | -p  | MQTT server port           | 1883      |
+
+## Commandline example 
+```
+python3 voccer.py --enable=bme680:2,bme680:4,sgp30:2,pms5003:1
+```
+Which enables first address BME680 (0x76) with ID 2, second address BME680 (0x77) with ID 4, SGP30 with ID 2
+and PMS5003 with ID 1
 
 ## Getting started with BME680
 
  * [Getting Started with BME680 Breakout](https://learn.pimoroni.com/tutorial/sandyj/getting-started-with-bme680-breakout)
  * [Pimoroni BME680 Github](https://learn.pimoroni.com/tutorial/sandyj/getting-started-with-bme680-breakout)
-
 ## Getting started with SGP30
 
  * [Python library for reading co2 and TVOC from the Sensirion SGP30 ](https://pypi.org/project/sgp30/)
+
+## Getting started with PMS5003
+
+ * [PMS5003 Particulate Sensor](https://github.com/pimoroni/pms5003-python)
 
 ## JSON
 JSON that script outputs to MQTT looks like this
@@ -54,15 +66,20 @@ JSON that script outputs to MQTT looks like this
 ## Types
 All those numbers in typeid and unitid are just numbers started from 100.
  
- | ID  | Type        | Unit    |
- |-----|-------------|---------|
- | 100 | temperature | Celsius |
- | 101 | humidity    | RH%     |
- | 102 | pressure    | hPa     |
- | 103 | AiQ         | AiQ     |
- | 104 | Resistance  | Gas     |
- | 105 | tVOC        | ppm     |
- | 106 | eCO2        | ppm     |
+ | ID  | Type                            | Unit    | UnitID |
+ |-----|---------------------------------|---------|--------|
+ | 100 | temperature                     | Celsius | 100    |
+ | 101 | humidity                        | RH%     | 101    |
+ | 102 | pressure                        | hPa     | 102    |
+ | 103 | AiQ                             | AiQ     | 103    |
+ | 104 | Resistance                      | Gas     | 104    |
+ | 105 | tVOC                            | ppm     | 105    |
+ | 106 | eCO2                            | ppm     | 105    |
+ | 107 | Particle PM1                    | ug/m3   | 107    |
+ | 108 | Particle PM2.5                  | ug/m3   | 107    |
+ | 109 | Particle PM10                   | ug/m3   | 107    |
+ | 110 | Atmospheric particle PM1        | ug/m3   | 107    |
+ | 111 | atmospheric particle PM2.0      | ug/m3   | 107    |
 
 ## Listening JSON from MQTT server
 and you can listen them with for example [Mosquitto MQTT-project](http://mosquitto.org/) tool *mosquitto_sub*
