@@ -27,7 +27,6 @@ class BaseSensor:
         self.logger = logger
         self.mqttc = mqttc
         self.sensor_id = sensor_id
-        self.mqtt_topic = "/sensor/voccer/2.0/"
 
     def measure_hash(self, sensor_id, measure_value, measure_type):
         """Create measurement JSON"""
@@ -71,14 +70,14 @@ class BaseSensor:
             typeid = 111
             unitid = 107
 
-        return json.dumps({
+        return {
             'timestamp': round(time.time(), 2),
             'id': int(sensor_id),
             'value': measure_value,
             'type': measure_type,
             'typeid': typeid,
             'unitid': unitid
-        })
+        }
 
     def enable_sensor(self):
         """Empty enable if we don't need it"""
@@ -86,7 +85,7 @@ class BaseSensor:
     def disable_sensor(self):
         """Empty disalbe if we don't need it"""
 
-    def step(self):
+    def step(self, queue):
         """Empty step just for to be sure"""
 
 
@@ -139,43 +138,49 @@ class PMS5003Sensor(BaseSensor):
             GPIO.setmode(GPIO.BCM)
             GPIO.setup(self.pms5003._pin_enable, GPIO.OUT, initial=GPIO.LOW)
 
-    def step(self):
+    def step(self, queue):
         with threading.Lock():
             if self.data is not None:
-                airatmospheric_environment_1_0 = self.measure_hash(
-                    self.sensor_id, self.data.pm_ug_per_m3(1.0, True),
-                    "atmospheric_PM1")
-                airatmospheric_environment_2_5 = self.measure_hash(
-                    self.sensor_id, self.data.pm_ug_per_m3(2.5, True),
-                    "atmospheric_PM2.5")
-                environment_1_0 = self.measure_hash(
-                    self.sensor_id, self.data.pm_ug_per_m3(1.0, False), "PM1")
-                environment_2_5 = self.measure_hash(
-                    self.sensor_id, self.data.pm_ug_per_m3(2.5, False),
-                    "PM2.5")
-                environment_10 = self.measure_hash(
-                    self.sensor_id, self.data.pm_ug_per_m3(10, False), "PM10")
+                queue.append([
+                    "airatmospheric_environment_PM1",
+                    self.measure_hash(self.sensor_id,
+                                      self.data.pm_ug_per_m3(1.0, True),
+                                      "atmospheric_PM1"), False
+                ])
+                queue.append([
+                    "airatmospheric_environment_PM2.5",
+                    self.measure_hash(self.sensor_id,
+                                      self.data.pm_ug_per_m3(2.5, True),
+                                      "atmospheric_PM2.5"), False
+                ])
+                queue.append([
+                    "PM1",
+                    self.measure_hash(self.sensor_id,
+                                      self.data.pm_ug_per_m3(1.0, False),
+                                      "PM1"), False
+                ])
+                queue.append([
+                    "PM2.5",
+                    self.measure_hash(self.sensor_id,
+                                      self.data.pm_ug_per_m3(2.5, False),
+                                      "PM2.5"), False
+                ])
+                queue.append([
+                    "PM10",
+                    self.measure_hash(self.sensor_id,
+                                      self.data.pm_ug_per_m3(10, False),
+                                      "PM10"), False
+                ])
 
-                (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "PM1",
-                                                      environment_1_0,
-                                                      qos=0)
-                (rtn_value,
-                 mid) = self.mqttc.publish(self.mqtt_topic + "PM2.5",
-                                           environment_2_5,
-                                           qos=0)
-
-                (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "PM10",
-                                                      environment_10,
-                                                      qos=0)
-
-                (rtn_value, mid) = self.mqttc.publish(
-                    self.mqtt_topic + "airatmospheric_environment_PM1",
-                    airatmospheric_environment_1_0,
-                    qos=0)
-                (rtn_value, mid) = self.mqttc.publish(
-                    self.mqtt_topic + "airatmospheric_environment_PM2.5",
-                    airatmospheric_environment_2_5,
-                    qos=0)
+                self.logger.debug(
+                    'PMS5003: Airatmospheric env PM1: {0:d} ug/m3, airatmospheric env PM2.5: {1:d} ug/m3'
+                    .format(self.data.pm_ug_per_m3(1.0, True),
+                            self.data.pm_ug_per_m3(2.5, True)))
+                self.logger.debug(
+                    'PMS5003: PM1 {0:d} %RH, PM2.5: {1:d} PM10 {2:d}'.format(
+                        self.data.pm_ug_per_m3(1.0, False),
+                        self.data.pm_ug_per_m3(2.5, False),
+                        self.data.pm_ug_per_m3(10, False)))
 
 
 class BME680Sensor(BaseSensor):
@@ -292,7 +297,7 @@ class BME680Sensor(BaseSensor):
     #            if isinstance(value, int):
     #                self.logger.debug('{}: {}'.format(name, value))
 
-    def step(self):
+    def step(self, queue):
         """ Main loop step for Bosch BME680 sensor """
         # pylint: disable=W0612,W0613
 
@@ -303,25 +308,40 @@ class BME680Sensor(BaseSensor):
             return False
 
         if self.sensor.get_sensor_data():
-            temperature = self.measure_hash(
-                self.sensor_id, round(self.sensor.data.temperature, 2),
-                "temperature")
-            pressure = self.measure_hash(self.sensor_id,
-                                         int(self.sensor.data.pressure),
-                                         "pressure")
-            humidity = self.measure_hash(self.sensor_id,
-                                         int(self.sensor.data.humidity),
-                                         "humidity")
-            gas = self.measure_hash(self.sensor_id,
-                                    round(self.sensor.data.gas_resistance, 2),
-                                    "gas")
+            queue.append([
+                "temperature",
+                self.measure_hash(self.sensor_id,
+                                  round(self.sensor.data.temperature, 2),
+                                  "temperature"), False
+            ])
+            queue.append([
+                "pressure",
+                self.measure_hash(self.sensor_id,
+                                  int(self.sensor.data.pressure), "pressure"),
+                False
+            ])
+            queue.append([
+                "humidity",
+                self.measure_hash(self.sensor_id,
+                                  int(self.sensor.data.humidity), "humidity"),
+                False
+            ])
+            queue.append([
+                "gas",
+                self.measure_hash(self.sensor_id,
+                                  round(self.sensor.data.gas_resistance, 2),
+                                  "gas"), False
+            ])
 
             air_quality_scr = self.air_quality_score(self.sensor,
                                                      self.gas_baseline,
                                                      hum_baseline)
-            air_quality = self.measure_hash(self.sensor_id,
-                                            round(air_quality_scr, 2),
-                                            "quality")
+
+            queue.append([
+                "quality",
+                self.measure_hash(self.sensor_id, round(air_quality_scr, 2),
+                                  "quality"), False
+            ])
 
             self.logger.debug(
                 'BME680: Temperature: {0:.2f}C, Pressure: {1:.2f} HPa'.format(
@@ -330,27 +350,6 @@ class BME680Sensor(BaseSensor):
                 'BME680: Humidity {0:.2f} %RH, Resistance: {1:.2f} Ohm Quality Indx {2:.2f}'
                 .format(self.sensor.data.humidity,
                         self.sensor.data.gas_resistance, air_quality_scr))
-
-            (rtn_value,
-             mid) = self.mqttc.publish(self.mqtt_topic + "temperature",
-                                       temperature,
-                                       qos=0)
-
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "pressure",
-                                                  pressure,
-                                                  qos=0)
-
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "humidity",
-                                                  humidity,
-                                                  qos=0)
-
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "gas",
-                                                  gas,
-                                                  qos=0)
-
-            (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "quality",
-                                                  air_quality,
-                                                  qos=0)
 
         return True
 
@@ -382,7 +381,7 @@ class SGP30Sensor(BaseSensor):
 
         return sgp
 
-    def step(self):
+    def step(self, queue):
         """ Main loop step for SGP30 sensor """
         # pylint: disable=W0612,W0613
 
@@ -391,19 +390,17 @@ class SGP30Sensor(BaseSensor):
 
         sgp_measurements = self.sensor.read_measurements()
 
-        co2 = self.measure_hash(self.sensor_id, int(sgp_measurements.data[0]),
-                                "co2")
-        tvoc = self.measure_hash(self.sensor_id, int(sgp_measurements.data[1]),
-                                 "voc")
+        queue.append([
+            "co2",
+            self.measure_hash(self.sensor_id, int(sgp_measurements.data[0]),
+                              "co2"), False
+        ])
+        queue.append([
+            "tvoc",
+            self.measure_hash(self.sensor_id, int(sgp_measurements.data[1]),
+                              "voc"), False
+        ])
 
-        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "co2",
-                                              co2,
-                                              qos=0)
-        (rtn_value, mid) = self.mqttc.publish(self.mqtt_topic + "tvoc",
-                                              tvoc,
-                                              qos=0)
-
-        sys.stdout.write(str(datetime.datetime.now()))
         self.logger.debug("SGP30: eCO2: " + str(sgp_measurements.data[0]) +
                           " tVOC: " + str(sgp_measurements.data[1]))
 
@@ -414,10 +411,13 @@ class Voccer:
     """Voccer class"""
     def __init__(self, logger, mqttc, mqtt_server, mqtt_port):
         self.logger = logger
+        self.msg_queue = []
 
+        self.mqtt_topic = "/sensor/voccer/2.0/"
         self.mqttc = mqttc
         self.mqtt_server = mqtt_server
         self.mqtt_port = mqtt_port
+        self.mqtt_is_connected = False
 
         self.mqttc.on_message = self.on_message
         self.mqttc.on_connect = self.on_connect
@@ -447,11 +447,13 @@ class Voccer:
         """Paho Connection callback."""
         # pylint: disable=W0612,W0613,C0103
         self.logger.debug("Paho MQTT Connected: " + str(rc))
+        self.mqtt_is_connected = True
 
     def on_disconnect(self, client, userdata, rc):
         """Paho Disconnection callback."""
         # pylint: disable=W0612,W0613,C0103
         self.logger.debug("Paho MQTT Disconnected: " + str(rc))
+        self.mqtt_is_connected = False
 
     def on_socket_open(self, client, userdata, sock):
         """Paho Socket open callback."""
@@ -462,6 +464,7 @@ class Voccer:
         """Paho Socjet close callback."""
         # pylint: disable=W0612,W0613
         self.logger.debug("Paho MQTT Socket close")
+        self.mqtt_is_connected = False
 
     def on_message(self, client, userdata, msg):
         """Paho Message send callback."""
@@ -496,7 +499,46 @@ class Voccer:
         while True:
             # First gather things
             for sensor in self.sensor_array:
-                sensor.step()
+                sensor.step(self.msg_queue)
+
+            # Try to send everything in Queue
+            # If MQTT server is not there of it doesn't
+            # Appear then just keep them in Queue for
+            # later on sending or running out of memory
+            for current_pos in range(len(self.msg_queue)):
+                mqtt_send_tries = 5
+
+                while mqtt_send_tries > 0:
+                    if self.mqtt_is_connected is True:
+                        current_msg_array = self.msg_queue[current_pos]
+                        (rtn_value, mid) = self.mqttc.publish(
+                            self.mqtt_topic + current_msg_array[0],
+                            json.dumps(current_msg_array[1]),
+                            qos=0)
+
+                        current_msg_array[2] = True
+                        mqtt_send_tries = -1
+                        time.sleep(0.1)
+                    else:
+                        self.logger.debug(
+                            "MQTT Server not connected waiting it to come online"
+                        )
+                        mqtt_send_tries -= 1
+                        time.sleep(1)
+
+                if mqtt_send_tries == 0:
+                    break
+
+            new_msg_queue = []
+
+            # Clean sended msg from Queue
+            for msg in self.msg_queue:
+                if msg[2] is False:
+                    new_msg_queue.append(msg)
+
+            # Replace old Queue with new one
+            self.msg_queue = new_msg_queue
+
             # Sleep for while before disable
             time.sleep(30)
             for sensor in self.sensor_array:
@@ -523,7 +565,7 @@ def main(argv):
     sensors['bme680_second'] = False
     sensors_list = []
     temp_offset = 0
-    temo_offset_array = None
+    temp_offset_array = None
 
     logger = logging.getLogger()
 
