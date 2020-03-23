@@ -6,10 +6,13 @@
 # SPDX-License-Identifier: MIT
 
 # pylint: disable=E0401
+import csv
 import datetime
+import io
 import json
 import time
 import logging
+import serial
 import sys
 import getopt
 import threading
@@ -89,13 +92,97 @@ class BaseSensor:
         """Empty step just for to be sure"""
 
 
+class ArduinoSensor(BaseSensor):
+    """ Arduino CSS811 sensor class """
+    def __init__(self, logger, mqttc, sensor_id, serial_device):
+        super().__init__(logger, mqttc, sensor_id)
+
+        # Open Serial port for reading
+        self.serial = serial.Serial(serial_device, 9600, timeout=15)
+        self.sio = io.TextIOWrapper(io.BufferedRWPair(self.serial,
+                                                      self.serial))
+        self.data = None
+        self.sensor1_co2 = None
+        self.sensor1_tvoc = None
+        self.sensor1_temp = None
+        self.sensor2_co2 = None
+        self.sensor2_tvoc = None
+        self.sensor2_temp = None
+
+        try:
+            threading.Thread(target=self._read_thread,
+                             args=(self.serial, )).start()
+        except ThreadError:
+            print(
+                "Arduino: Can't start reading thread. You can't get anything out of this"
+            )
+
+    def _read_thread(self, serial):
+        """ Read from serial device """
+        while True:
+            try:
+                self.data = self.sio.readline()
+                if '#' in self.data or len(self.data) == 0:
+                    continue
+            except:
+                print("Arduino: Can't read from serial port")
+
+            csv_reader = csv.reader([self.data])
+
+            for row in csv_reader:
+                if (len(row) >= 2 and row[0].isdigit() and row[1].isdigit()):
+
+                    if int(row[0]) == 1:
+                        self.sensor1_co2 = int(row[1])
+                        self.sensor1_tvoc = int(row[2])
+                    else:
+                        self.sensor2_co2 = int(row[1])
+                        self.sensor2_tvoc = int(row[2])
+
+                if (len(row) >= 4 and row[0].isdigit() and row[1].isdigit()):
+                    if int(row[0]) == 1:
+                        self.sensor1_temp = round(float(row[3]), 2)
+                    else:
+                        self.sensor2_temp = round(float(row[3]), 2)
+
+    def step(self, queue):
+        with threading.Lock():
+            if self.data is not None:
+                queue.append([
+                    "co2",
+                    self.measure_hash(self.sensor_id, self.sensor1_co2, "co2"),
+                    False
+                ])
+                queue.append([
+                    "voc",
+                    self.measure_hash(self.sensor_id, self.sensor1_tvoc,
+                                      "voc"), False
+                ])
+                queue.append([
+                    "co2",
+                    self.measure_hash((self.sensor_id + 1), self.sensor2_co2,
+                                      "co2"), False
+                ])
+                queue.append([
+                    "voc",
+                    self.measure_hash((self.sensor_id + 1), self.sensor2_tvoc,
+                                      "voc"), False
+                ])
+                self.logger.debug(
+                    'Arduino: Sensor1 CO2: {0:d} ug/m3 (ppm), VOC: {1:d} ng/m3 (ppb)'
+                    .format(self.sensor1_co2, self.sensor1_tvoc))
+                self.logger.debug(
+                    'Arduino: Sensor2 CO2: {0:d} ug/m3 (ppm), VOC: {1:d} ng/m3 (ppb)'
+                    .format(self.sensor2_co2, self.sensor2_tvoc))
+
+
 class PMS5003Sensor(BaseSensor):
-    """ BME680 sensor class """
-    def __init__(self, logger, mqttc, sensor_id, serialdevice):
+    """ PMS5003 sensor class """
+    def __init__(self, logger, mqttc, sensor_id, serial_device):
         super().__init__(logger, mqttc, sensor_id)
 
         # Configure the PMS5003 for Enviro+
-        self.pms5003 = PMS5003(device=serialdevice,
+        self.pms5003 = PMS5003(device=serial_device,
                                baudrate=9600,
                                pin_enable=22,
                                pin_reset=27)
@@ -107,7 +194,7 @@ class PMS5003Sensor(BaseSensor):
         try:
             threading.Thread(target=self._read_thread,
                              args=(self.pms5003, )).start()
-        except:
+        except ThreadError:
             print(
                 "PMS5003: Can't start reading thread. You can't get anything out of this"
             )
@@ -177,7 +264,7 @@ class PMS5003Sensor(BaseSensor):
                     .format(self.data.pm_ug_per_m3(1.0, True),
                             self.data.pm_ug_per_m3(2.5, True)))
                 self.logger.debug(
-                    'PMS5003: PM1 {0:d} %RH, PM2.5: {1:d} PM10 {2:d}'.format(
+                    'PMS5003: PM1 {0:d}, PM2.5: {1:d} PM10 {2:d}'.format(
                         self.data.pm_ug_per_m3(1.0, False),
                         self.data.pm_ug_per_m3(2.5, False),
                         self.data.pm_ug_per_m3(10, False)))
@@ -402,7 +489,9 @@ class SGP30Sensor(BaseSensor):
         ])
 
         self.logger.debug("SGP30: eCO2: " + str(sgp_measurements.data[0]) +
-                          " tVOC: " + str(sgp_measurements.data[1]))
+                          " ug/m3 (ppm)"
+                          " tVOC: " + str(sgp_measurements.data[1]) +
+                          " ng/m3 (ppb)")
 
         return True
 
@@ -585,10 +674,10 @@ def main(argv):
         print('  --sensorid (-s) Sensor id')
         print('  --tempoffset (-t) How much is temperature offset (+/-)')
         print(
-            '  --enable (-t) Enable sensor. comma separated list for multiple sensors (bme680, sgp30 or pms5003)'
+            '  --enable (-t) Enable sensor. comma separated list for multiple sensors (bme680, sgp30, ccs811 or pms5003)'
         )
         print(
-            '                --enable=bme680,bme680,sgp30,pms5003 (Multi stuff only works with bme680 currently)'
+            '                --enable=bme680,bme680,sgp30,pms5003,ccs811 (Multi stuff only works with bme680 currently)'
         )
         print(
             '              if you want to some sensor to have specific if use sensor:id notation like "bme680:1"'
@@ -633,6 +722,9 @@ def main(argv):
             sensor_split_array = sensor_name_lower.split(':')
             sensor_id = int(sensor_split_array[1])
             sensor_name_lower = sensor_split_array[0]
+
+        if sensor_name_lower == 'ccs811':
+            sensor = ArduinoSensor(logger, mqttc, sensor_id, '/dev/ttyACM0')
 
         if sensor_name_lower == 'pms5003':
             sensor = PMS5003Sensor(logger, mqttc, sensor_id, '/dev/ttyS0')

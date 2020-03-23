@@ -1,5 +1,5 @@
 # Voccer
-Small Python3 based utility to send tVOC, eCO2, Particulate Matter with Bosch BME680, Sensirion SGP30 and Plantower PMS5003
+Small Python3 based utility to send tVOC, eCO2, Particulate Matter with Bosch BME680, AMS CCS811, Sensirion SGP30 and Plantower PMS5003
 measurements to MQTT server
 
 First of all read this:
@@ -17,6 +17,7 @@ It's tested with these break-out boards and sensors
 
  * [Adafruit SGP30 Air Quality Sensor Breakout - VOC and eCO2](https://www.adafruit.com/product/3709)
  * [BME680 Breakout - Air Quality, Temperature, Pressure, Humidity Sensor BME680 Breakout - Air Quality, Temperature, Pressure, Humidity Sensor](https://shop.pimoroni.com/products/bme680-breakout)
+ * [SparkFun Air Quality Breakout - CCS811](https://www.sparkfun.com/products/14193)
  * [PMS5003 Particulate Matter Sensor Breakout](https://shop.pimoroni.com/products/particulate-matter-sensor-breakout) and [PMS5003 Particulate Matter Sensor with Cable](https://shop.pimoroni.com/products/pms5003-particulate-matter-sensor-with-cable)
 
 As noticed they both I2C based so one has to have skills to make them work
@@ -25,6 +26,7 @@ Python libraries. If you can see them in I2C-bus with *i2c-detect* then they
 should work.
 
 Most of the python libraries can be found with Python pip package manager
+**CCS811 doesn't play well with Raspberry Pi. You need Arduino UNO to use CCS811**
 
 **As said earlier: it's up to you make sensors work**
 
@@ -40,7 +42,7 @@ Most of the python libraries can be found with Python pip package manager
 
 ## Commandline example 
 ```
-python3 voccer.py --enable=bme680:2,bme680:4,sgp30:2,pms5003:1
+python3 voccer.py --enable=bme680:2,bme680:4,sgp30:2,pms5003:1,css811:5
 ```
 Which enables first address BME680 (0x76) with ID 2, second address BME680 (0x77) with ID 4, SGP30 with ID 2
 and PMS5003 with ID 1
@@ -49,9 +51,21 @@ and PMS5003 with ID 1
 
  * [Getting Started with BME680 Breakout](https://learn.pimoroni.com/tutorial/sandyj/getting-started-with-bme680-breakout)
  * [Pimoroni BME680 Github](https://learn.pimoroni.com/tutorial/sandyj/getting-started-with-bme680-breakout)
+
 ## Getting started with SGP30
 
  * [Python library for reading co2 and TVOC from the Sensirion SGP30 ](https://pypi.org/project/sgp30/)
+
+## Getting started with CCS811
+
+In subdirecotory ccs811_arduino is application which you need to compile and upload to Arduino UNO.
+After that your Arduino UNO has to be attached to Raspberry Pi (or machine you like use) with USB cable.
+Then it should work. It outputs CSV so if you just log CCS811 (or two of them) then you can just log
+serial port to file and analyze with Libreoffice or similar.
+
+Please note that it takes 2 IDs from MQTT if you use two CSS811 sensors.
+
+**NOTE! You have to have correct rights to read serial port in your machine.**
 
 ## Getting started with PMS5003
 
