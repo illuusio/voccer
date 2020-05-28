@@ -1,0 +1,6 @@
+paho.mqtt.client>=1.0.0
+RPi.GPIO>=0.6.0
+bme680>=1.0.0
+smbus2>=0.3.0
+sgp30>=0.1.6
+pms5003>=0.0.5
