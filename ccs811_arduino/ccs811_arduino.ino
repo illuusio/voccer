@@ -39,11 +39,13 @@
 #define CCS811_HIGH_TEMPCOMP -5.5
 #define CCS811_LOW_TEMPCOMP -7.5
 
-#define CCS811_READ_DELAY (10 * (60 * 1000 * 1000))
+#define CCS811_READ_DELAY 1000
+#define CSS811_PRINT_NOW (60*5)
 
 CCS811 highSensor(CCS811_HIGH_ADDR);
 CCS811 lowSensor(CCS811_LOW_ADDR);
 int printHeader = 100;
+int printNow = 0;
 
 void setup()
 {
@@ -68,6 +70,8 @@ void setup()
     }
 
     Serial.println("# CCS811 Voccer printer");
+
+    delay(100);
 }
 
 /**
@@ -80,38 +84,11 @@ void setup()
 
 void dataAvailable(int id, CCS811 *sensor, float tempcomp)
 {
-    // As this is CSV output then print what they mean once and while
-    if(printHeader >= 80)
-    {
-        Serial.println("# CO2, tVOC, Deg C, millis from start");
-        printHeader = 0;
-    }
-    printHeader ++;
-
-    // This is very poor way to print CSV but we have limited amount
-    // of everything so we don't waste it
-
-    Serial.print(id);
-    Serial.print(",");
-
     // If so, have the sensor read and calculate the results.
     // Get them later
     sensor->readAlgorithmResults();
     sensor->readNTC();
     float readTemperature = sensor->getTemperature() + tempcomp;
-
-    // Returns calculated CO2 reading
-    Serial.print(sensor->getCO2());
-    Serial.print(",");
-    // Returns calculated TVOC reading
-    Serial.print(sensor->getTVOC());
-    Serial.print(",");
-    Serial.print( readTemperature, 2);
-    Serial.print(",");
-
-    // Simply the time since program start
-    Serial.print(millis());
-    Serial.println();
 
     // .readNTC() causes the CCS811 library to gather ADC data and save value
     // Serial.print(" Measured resistance : ");
@@ -128,6 +105,37 @@ void dataAvailable(int id, CCS811 *sensor, float tempcomp)
     // If board doesn't have termistor skip this or readings
     // are wrong
     sensor->setEnvironmentalData(50, readTemperature);
+
+    if(printNow <= 0)
+    {
+        // As this is CSV output then print what they mean once and while
+        if(printHeader >= 80)
+        {
+            Serial.println("# CO2, tVOC, Deg C, millis from start");
+            printHeader = 0;
+        }
+        printHeader ++;
+
+        // This is very poor way to print CSV but we have limited amount
+        // of everything so we don't waste it
+
+        Serial.print(id);
+        Serial.print(",");
+
+        // Returns calculated CO2 reading
+        Serial.print(sensor->getCO2());
+        Serial.print(",");
+        // Returns calculated TVOC reading
+        Serial.print(sensor->getTVOC());
+        Serial.print(",");
+        Serial.print( readTemperature, 2);
+        Serial.print(",");
+
+        // Simply the time since program start
+        Serial.print(millis());
+        Serial.println();
+    }
+
 }
 
 
@@ -161,6 +169,13 @@ void loop()
     // {
     //  Serial.println("# Can't get measurement or error from sensor 2");
     // }
+
+    if(printNow <= 0)
+    {
+       printNow = CSS811_PRINT_NOW;
+    }
+
+    printNow --;
 
     delay(CCS811_READ_DELAY);
 }
