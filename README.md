@@ -37,7 +37,7 @@ Most of the python libraries can be found with Python pip package manager
  | -s  | Sensor ID                  | 1         |
  | -t  | Temp offset for BME680     | 0         |
  | -e  | Enable sensor              | Nothing   |
- | -m  | MQTT server address        | localhost |
+ | -m  | MQTT server address        | localhost |
  | -p  | MQTT server port           | 1883      |
 
 ## Commandline example 
@@ -115,10 +115,10 @@ Project doen't currently provice SQL-statement to create table but it's like thi
 |------------|---------------------|------|------|---------|----------------|
 | id         | bigint(20)          | NO   | PRI  | NULL    | auto_increment |
 | unitType   | tinyint(4) unsigned | NO   |      | 0       |                |	
-| sensorId   | tinyint(4) unsigned | NO   |      | 0 	   |                |
-| sensorType | tinyint(4) unsigned | NO   |      | 0 	   |                |
-| time 	     | int(11)             | NO   |      | 0 	   |                |
-| value 	 | double 	           | NO	  |      | 0 	   |                |
+| sensorId   | tinyint(4) unsigned | NO   |      | 0 	   |                |
+| sensorType | tinyint(4) unsigned | NO   |      | 0 	   |                |
+| time       | int(11)             | NO   |      | 0       |                |
+| value      | double              | NO   |      | 0       |                |
 
 ## Fluentd setup
 There is good documentation for Fluentd configuration but this is simple config file
