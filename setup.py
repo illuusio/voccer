@@ -19,12 +19,12 @@ setuptools.setup(
     scripts=['voccer.py'],
     packages=setuptools.find_packages(),
     install_requires=[
-        'paho.mqtt.client>=1.0.0'
-        'RPi.GPIO>=0.6.0'
-        'bme680>=1.0.0'
-        'smbus2>=0.3.0'
-        'sgp30>=0.1.6'
-        'pms5003>=0.0.5'
+        'paho.mqtt.client'
+        'RPi.GPIO'
+        'bme680'
+        'smbus2'
+        'sgp30'
+        'pms5003'
     ],
     long_description=long_description,
     long_description_content_type="text/markdown",
